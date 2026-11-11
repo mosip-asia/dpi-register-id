@@ -71,21 +71,29 @@ uv sync
 ```
 *(VS Code Dev Containers are also supported via `.devcontainer/`)*.
 
-### 2. Run Locally
+### 2. Run with Docker Compose (Full Stack)
 ```bash
-# Display CLI commands
-uv run register-id --help
+# Spin up complete stack (App + Redis + PostgreSQL IDRepo + Keycloak IAM)
+docker compose up -d
 
-# Run Web Server (FastAPI + Django hybrid runtime)
+# Open Web Gateway:    http://localhost:8000
+# Open Keycloak Admin:  http://localhost:8080 (admin / admin)
+# PostgreSQL IDRepo:    localhost:5432
+```
+
+### 3. Run Locally with uv (Hybrid Mode)
+```bash
+# 1. Start background datastores (Redis, Postgres, Keycloak)
+docker compose up -d redis postgres keycloak
+
+# 2. Run Web Server locally
 uv run register-id web
-# Open: http://localhost:8000
 
-# Run Background Worker (Celery + Redis)
-docker compose up -d redis
+# 3. (Optional) Run Background Celery Worker
 uv run register-id celery worker
 ```
 
-### 3. Run Pre-Push Checks
+### 4. Run Pre-Push Checks
 ```bash
 bash scripts/check.sh
 ```
@@ -147,15 +155,8 @@ Technical details, architecture specifications, and implementation schedules are
 ├── .env.example                 # Single environment configuration template
 ├── AGENTS.md                    # Operational guidelines for AI agents
 ├── django_manage.py             # Django entrypoint script
-├── docker-compose.yml           # Unified stack compose (App + Redis)
-├── docker-compose.traefik.yml   # Traefik overlay for deployed environments
-├── Dockerfile                   # Multi-stage production container build
-├── pyproject.toml               # Project dependencies and packaging (register-id)
-└── README.md
-```
-├── AGENTS.md                    # Operational guidelines for AI agents
-├── django_manage.py             # Django entrypoint script
-├── docker-compose.yml           # Unified stack compose (App + Redis)
+├── docker-compose.yml           # Base compose stack (App + Redis)
+├── docker-compose.mosip.yml     # MOSIP local overlay (PostgreSQL IDRepo + Keycloak IAM)
 ├── docker-compose.traefik.yml   # Traefik overlay for deployed environments
 ├── Dockerfile                   # Multi-stage production container build
 ├── pyproject.toml               # Project dependencies and packaging (register-id)
