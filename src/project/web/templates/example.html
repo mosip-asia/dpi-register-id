@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}Example{% endblock %}
+{% block content %}
+	<h1><a href="{{ url_for('get_example', id=id) }}">Item ID: {{ id }}</a></h1>
+{% endblock %}

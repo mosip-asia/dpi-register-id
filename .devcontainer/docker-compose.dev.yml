@@ -1,0 +1,21 @@
+# DevContainer Compose Overlay
+# Extends the root docker-compose.yml with live-reload volume mounts and development tooling.
+
+services:
+  app:
+    build:
+      target: development
+    volumes:
+      - type: bind
+        source: ${LOCAL_WORKSPACE_FOLDER:-.}
+        target: /app
+      - venv:/app/.venv
+      - uv_cache:/app/.uv_cache
+    command: ["sleep", "infinity"]
+    environment:
+      IS_DEVCONTAINER: "True"
+      ENVIRONMENT: "dev"
+
+volumes:
+  venv:
+  uv_cache:
