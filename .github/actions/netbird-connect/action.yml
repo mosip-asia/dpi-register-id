@@ -1,0 +1,56 @@
+name: "Connect to NetBird Mesh"
+description: "Installs NetBird client and connects to the mesh network using a setup key"
+inputs:
+  management-url:
+    description: "NetBird management server URL"
+    required: true
+  setup-key:
+    description: "NetBird setup key"
+    required: true
+  server-host:
+    description: "Target server host or IP to verify reachability with ping"
+    required: true
+  max-attempts:
+    description: "Max number of ping attempts while waiting for mesh stabilization"
+    required: false
+    default: "10"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install NetBird client
+      shell: bash
+      run: |
+        echo "Installing NetBird client..."
+        curl -fsSL https://pkgs.netbird.io/install.sh | sudo sh
+
+    - name: Start NetBird daemon
+      shell: bash
+      run: |
+        echo "Starting NetBird daemon..."
+        sudo netbird service start || true
+
+    - name: Authenticate to NetBird mesh
+      shell: bash
+      run: |
+        echo "Authenticating to NetBird mesh..."
+        sudo netbird up \
+          --management-url "${{ inputs.management-url }}" \
+          --setup-key "${{ inputs.setup-key }}"
+
+    - name: Verify network stabilization & connectivity
+      shell: bash
+      run: |
+        echo "Waiting for NetBird network stabilization & handshake..."
+        for ((i = 1; i <= ${{ inputs.max-attempts }}; i++)); do
+          echo "--- NetBird Status Check (Attempt $i/${{ inputs.max-attempts }}) ---"
+          sudo netbird status --detail || sudo netbird status || true
+          if ping -c 1 -W 2 "${{ inputs.server-host }}" > /dev/null 2>&1; then
+            echo "✅ Successfully connected to NetBird mesh and reached ${{ inputs.server-host }}!"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "❌ Timed out waiting to reach ${{ inputs.server-host }} over NetBird mesh!"
+        exit 1
+

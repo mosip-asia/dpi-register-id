@@ -1,0 +1,24 @@
+name: "Setup SSH Authentication"
+description: "Configures SSH private key and adds the target host to known_hosts"
+inputs:
+  ssh-key:
+    description: "Private SSH key content"
+    required: true
+  server-host:
+    description: "Target server hostname or IP to scan into known_hosts"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure SSH key and known_hosts
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        printf '%s\n' "${{ inputs.ssh-key }}" | tr -d '\r' > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        ssh-keyscan -H "${{ inputs.server-host }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+        echo "Configured SSH key fingerprint:"
+        ssh-keygen -l -f ~/.ssh/id_ed25519
+

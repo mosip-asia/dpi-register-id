@@ -1,0 +1,108 @@
+name: "Deployment Pre-flight Validation"
+description: "Inspects the NetBird mesh and SSH deployment credentials and variables of the target environment"
+inputs:
+  environment:
+    description: "GitHub Environment the job deploys to (dev, stg, uat, or production)"
+    required: true
+  netbird-setup-key:
+    description: "NetBird setup key (repository secret)"
+    required: false
+  ssh-private-key:
+    description: "SSH private key content (environment secret)"
+    required: false
+  netbird-management-url:
+    description: "NetBird self-hosted management URL (repository variable)"
+    required: false
+  server-host:
+    description: "Target server's NetBird name or mesh IP (environment variable)"
+    required: false
+  server-user:
+    description: "SSH deploy user on the target host (environment variable)"
+    required: false
+  server-project-dir:
+    description: "Absolute project directory on the target host (environment variable)"
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Inspect Deployment Credentials & Variables
+      shell: bash
+      env:
+        TARGET_ENV: ${{ inputs.environment }}
+        REPO_NAME: ${{ github.event.repository.name }}
+        NETBIRD_KEY: ${{ inputs.netbird-setup-key }}
+        SSH_KEY: ${{ inputs.ssh-private-key }}
+        NETBIRD_MANAGEMENT_URL: ${{ inputs.netbird-management-url }}
+        SERVER_HOST: ${{ inputs.server-host }}
+        SERVER_USER: ${{ inputs.server-user }}
+        SERVER_PROJECT_DIR: ${{ inputs.server-project-dir }}
+      run: |
+        echo "========================================================"
+        echo "🔐 Deployment Secrets & Variables Pre-Flight Check"
+        echo "   Environment: ${TARGET_ENV}"
+        echo "========================================================"
+
+        ENV_PLACE="Settings -> Environments -> ${TARGET_ENV}"
+        REPO_PLACE="Settings -> Secrets and variables -> Actions (repository level, shared by all environments)"
+        MISSING=0
+
+        # Secrets validation
+        if [ -z "$NETBIRD_KEY" ]; then
+          echo "❌ MISSING SECRET: NETBIRD_SETUP_KEY"
+          echo "   👉 A reusable, ephemeral NetBird setup key (auto-group prj-aititserv-cicd). Set it in: ${REPO_PLACE}"
+          MISSING=1
+        else
+          echo "✅ FOUND SECRET: NETBIRD_SETUP_KEY (${#NETBIRD_KEY} chars)"
+        fi
+
+        if [ -z "$SSH_KEY" ]; then
+          echo "❌ MISSING SECRET: SSH_PRIVATE_KEY"
+          echo "   👉 The deploy key of this environment's VM. Set it in: ${ENV_PLACE}"
+          MISSING=1
+        else
+          echo "✅ FOUND SECRET: SSH_PRIVATE_KEY (${#SSH_KEY} chars)"
+        fi
+
+        # Variables validation
+        if [ -z "$NETBIRD_MANAGEMENT_URL" ]; then
+          echo "❌ MISSING VARIABLE: NETBIRD_MANAGEMENT_URL"
+          echo "   👉 e.g. https://netbird.dpi.ait.ac.th. Set it in: ${REPO_PLACE}"
+          MISSING=1
+        else
+          echo "✅ FOUND VARIABLE: NETBIRD_MANAGEMENT_URL = $NETBIRD_MANAGEMENT_URL"
+        fi
+
+        if [ -z "$SERVER_HOST" ]; then
+          echo "❌ MISSING VARIABLE: SERVER_HOST"
+          echo "   👉 The VM's NetBird name (dev: ait-itserv-dev-vm, uat: ait-itserv-uat-vm, production: ait-itserv-vm). Set it in: ${ENV_PLACE}"
+          MISSING=1
+        else
+          echo "✅ FOUND VARIABLE: SERVER_HOST = $SERVER_HOST"
+        fi
+
+        if [ -z "$SERVER_USER" ]; then
+          echo "❌ MISSING VARIABLE: SERVER_USER"
+          echo "   👉 deploy on the GCP VMs (dev, uat), ubuntu on the campus VM (production). Set it in: ${ENV_PLACE}"
+          MISSING=1
+        else
+          echo "✅ FOUND VARIABLE: SERVER_USER = $SERVER_USER"
+        fi
+
+        if [ -z "$SERVER_PROJECT_DIR" ]; then
+          echo "❌ MISSING VARIABLE: SERVER_PROJECT_DIR"
+          echo "   👉 /projects/${REPO_NAME}. Set it in: ${ENV_PLACE}"
+          MISSING=1
+        else
+          echo "✅ FOUND VARIABLE: SERVER_PROJECT_DIR = $SERVER_PROJECT_DIR"
+        fi
+
+        echo "========================================================"
+
+        if [ "$MISSING" -ne 0 ]; then
+          echo ""
+          echo "❌ ABORTING: Required deployment secrets or variables are missing for environment '${TARGET_ENV}'!"
+          exit 1
+        fi
+
+        echo "🎉 All required deployment credentials and variables are configured for '${TARGET_ENV}'!"

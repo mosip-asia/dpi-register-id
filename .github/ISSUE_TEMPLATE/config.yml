@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: AIT Brainlab Documentation
+    url: https://github.com/AIT-brainlab/python-project-starter/tree/dev/docs
+    about: Please review the component and deployment guides before submitting issues.
