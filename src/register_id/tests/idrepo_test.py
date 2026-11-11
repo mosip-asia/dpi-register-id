@@ -1,9 +1,9 @@
 import base64
 import pytest
 from fastapi.testclient import TestClient
+from mock.idrepo.app import idrepo_app
 from register_id.cbeff import build_cbeff_xml
 from register_id.idrepo_client import IDRepoClient
-from register_id.mock_idrepo import idrepo_app
 
 mock_client = TestClient(idrepo_app)
 

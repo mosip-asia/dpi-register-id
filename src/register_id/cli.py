@@ -70,13 +70,3 @@ def check_backend():
     print(f"MOSIP IDRepo Endpoint: [cyan]{idrepo.base_url}[/cyan]")
     print(f"MOSIP IDRepo Status:   [{color}]{status}[/{color}] (info: {health})")
 
-
-@cli.command("serve-idrepo")
-def serve_idrepo(host: str = "0.0.0.0", port: int = 8080):
-    """
-    Start the MOSIP IDRepo mock REST service container/daemon.
-    """
-    from register_id.mock_idrepo import run_idrepo_server
-
-    print(f"Starting MOSIP IDRepo REST Service on http://{host}:{port} ...")
-    run_idrepo_server(host=host, port=port)

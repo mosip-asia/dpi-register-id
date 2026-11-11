@@ -39,7 +39,7 @@ class IDRepoClient:
     def _get_test_client(self):
         if self._test_client is None:
             from fastapi.testclient import TestClient
-            from register_id.mock_idrepo import idrepo_app
+            from mock.idrepo.app import idrepo_app
             self._test_client = TestClient(idrepo_app)
         return self._test_client
 
