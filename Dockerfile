@@ -48,6 +48,7 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
 ENV PYTHONUNBUFFERED=1
 ENV ENVIRONMENT=dev
 
@@ -77,6 +78,7 @@ COPY --from=builder --chown=appuser:appgroup /app/django_manage.py /app/django_m
 COPY --from=builder --chown=appuser:appgroup /app/pyproject.toml /app/pyproject.toml
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
 ENV PYTHONUNBUFFERED=1
 
 USER appuser

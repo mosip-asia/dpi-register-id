@@ -65,6 +65,11 @@
         <div id="pad-badge" class="position-absolute top-0 end-0 m-3 px-3 py-1 rounded bg-black bg-opacity-75 text-info font-monospace small border border-info d-none">
           👁️ EAR: <span id="ear-val">0.00</span> | <span id="pad-status">Monitoring</span>
         </div>
+
+        <!-- Anti-Replay Challenge Overlay -->
+        <div id="challenge-badge" class="position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-warning font-monospace small border border-warning d-none">
+          <span id="challenge-icon">🎯</span> <span id="challenge-text">Challenge: Initializing...</span>
+        </div>
       </div>
 
       <!-- Action Buttons below Viewfinder -->
@@ -159,20 +164,52 @@
   const placeholder = document.getElementById('cam-placeholder');
   let modelsLoaded = false;
 
-  // Liveness Variables
+  // Liveness & Challenge Variables
   let blinkCount = 0;
   let minEarObserved = 1.0;
   let maxEarObserved = 0.0;
   let livenessStartTime = Date.now();
+  let activeChallenge = null;
+  let challengeBlinks = 0;
+  let lastBlinkTime = 0;
 
-  function generateUIN() {
+  async function initUIN() {
+    try {
+      const res = await fetch('/api/idgenerator/uin');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.uin) {
+          document.getElementById('in-uin').value = data.uin;
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('IDGenerator fetch failed, using local format', e);
+    }
     const p1 = Math.floor(1000 + Math.random() * 9000);
     const p2 = Math.floor(1000 + Math.random() * 9000);
     const p3 = Math.floor(1000 + Math.random() * 9000);
-    return `${p1}-${p2}-${p3}`;
+    document.getElementById('in-uin').value = `${p1}-${p2}-${p3}`;
   }
 
-  document.getElementById('in-uin').value = generateUIN();
+  async function fetchLivenessChallenge() {
+    try {
+      const res = await fetch('/api/liveness/challenge', { method: 'POST' });
+      if (res.ok) {
+        activeChallenge = await res.json();
+        challengeBlinks = 0;
+        const badge = document.getElementById('challenge-badge');
+        badge.classList.remove('d-none');
+        badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-warning font-monospace small border border-warning';
+        document.getElementById('challenge-icon').innerText = '🎯';
+        document.getElementById('challenge-text').innerText = `Challenge: Blink ${activeChallenge.targetBlinks} times (0/${activeChallenge.targetBlinks})`;
+      }
+    } catch (e) {
+      console.warn('Could not fetch liveness challenge:', e);
+    }
+  }
+
+  initUIN();
 
   async function loadModels() {
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';

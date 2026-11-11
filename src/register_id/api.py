@@ -120,7 +120,12 @@ def enroll_citizen_endpoint(req: EnrollRequest):
         cbeff_xml=cbeff_xml,
     )
     if not saved:
-        raise HTTPException(status_code=500, detail="Failed to save citizen record into IDRepo.")
+        error_msg = getattr(idrepo, "last_error", None) or "Failed to persist identity in MOSIP IDRepo"
+        logger.error(f"Enrollment failed in IDRepo: {error_msg}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"MOSIP IDRepo enrollment failed: {error_msg}",
+        )
 
     # 3. Synchronize with Keycloak IAM
     keycloak = get_keycloak_client()

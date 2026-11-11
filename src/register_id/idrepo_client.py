@@ -34,6 +34,7 @@ class IDRepoClient:
     def __init__(self, base_url: str | None = None, enable_inprocess_fallback: bool = True):
         self.base_url = (base_url or MOSIP_IDREPO_BASE_URL).rstrip("/")
         self.enable_inprocess_fallback = enable_inprocess_fallback
+        self.last_error: str | None = None
         self._test_client = None
 
     def _get_test_client(self):
@@ -136,6 +137,9 @@ class IDRepoClient:
             },
         }
 
+        self.last_error = None
+        remote_error = None
+
         # 1. Attempt remote HTTP call
         try:
             r = requests.post(
@@ -148,8 +152,14 @@ class IDRepoClient:
                 data = r.json()
                 if not data.get("errors"):
                     return True
-            logger.warning(f"IDRepo remote enroll failed ({r.status_code}): {r.text[:200]}")
+                errors = data.get("errors", [])
+                err_msgs = [e.get("message", str(e)) for e in errors]
+                remote_error = f"MOSIP IDRepo error: {', '.join(err_msgs)}"
+            else:
+                remote_error = f"MOSIP IDRepo returned HTTP {r.status_code}: {r.text[:200]}"
+            logger.warning(f"IDRepo remote enroll failed: {remote_error}")
         except Exception as e:
+            remote_error = f"Failed to connect to MOSIP IDRepo at '{self.base_url}': {e}"
             logger.debug(f"IDRepo remote connection failed: {e}")
 
         # 2. In-process fallback
@@ -161,9 +171,14 @@ class IDRepoClient:
                     data = r.json()
                     if not data.get("errors"):
                         return True
+                    errors = data.get("errors", [])
+                    err_msgs = [e.get("message", str(e)) for e in errors]
+                    self.last_error = f"In-process mock IDRepo error: {', '.join(err_msgs)}"
+                    return False
             except Exception as e:
-                logger.error(f"In-process IDRepo fallback failed: {e}")
+                logger.debug(f"In-process IDRepo fallback failed: {e}")
 
+        self.last_error = remote_error or "Unknown error communicating with MOSIP IDRepo"
         return False
 
     def get_identity(self, uin: str) -> dict[str, Any] | None:

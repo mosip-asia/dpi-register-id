@@ -31,6 +31,7 @@ services:
     container_name: ${PROJECT_NAME}-idrepo
     command: ["python3", "-m", "mock.idrepo"]
     environment:
+      PYTHONPATH: "/app/src"
       POSTGRES_HOST: "postgres"
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER}

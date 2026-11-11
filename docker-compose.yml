@@ -27,6 +27,7 @@ services:
     image: ${PROJECT_NAME}:dev
     container_name: ${PROJECT_NAME}-app
     environment:
+      PYTHONPATH: "/app/src"
       PROJECT_NAME: ${PROJECT_NAME}
       ENVIRONMENT: ${ENVIRONMENT}
       BUILD_VERSION: ${BUILD_VERSION}
