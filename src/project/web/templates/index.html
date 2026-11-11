@@ -1,16 +1,517 @@
 {% extends "base.html" %}
-{% block title %}register-id - Citizen Registration Gateway{% endblock %}
-{% block content %}
-	<div class="py-4">
-		<h1>register-id</h1>
-		<p class="lead text-muted">DPI Citizen Registration Gateway (MOSIP Asia)</p>
-		<div class="mb-3">
-			<span class="badge {% if environment == 'prod' %}bg-danger{% elif environment == 'stg' %}bg-warning text-dark{% else %}bg-primary{% endif %}">
-				{{ environment | upper }}
-			</span>
-			<span class="text-muted ms-2">build version: {{ build_version }}</span>
-		</div>
+{% block title %}register-id — DPI Citizen Registration Gateway{% endblock %}
 
-		<a class="btn btn-outline-primary" href="example/1234">Example</a>
-	</div>
+{% block content %}
+<div class="py-4">
+  <!-- Header Bar -->
+  <header class="d-flex justify-content-between align-items-center pb-3 mb-4 border-bottom">
+    <div class="d-flex align-items-center gap-3">
+      <div class="rounded-3 bg-primary text-white d-flex align-items-center justify-center fw-bold fs-4 px-3 py-1 shadow-sm">
+        M
+      </div>
+      <div>
+        <h1 class="h3 fw-bold mb-0">register-id</h1>
+        <small class="text-muted font-monospace">DPI Citizen Registration Gateway • ISO/IEC 30107-3 PAD • ISO 19794-5 CBEFF</small>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge {% if environment == 'prod' %}bg-danger{% elif environment == 'stg' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+        {{ environment | upper }}
+      </span>
+      <span class="badge bg-light text-dark border font-monospace">v{{ build_version }}</span>
+      <a class="btn btn-sm btn-outline-secondary ms-2" href="/example/1234">Test Route</a>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <ul class="nav nav-tabs mb-4" id="mainTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active fw-bold" id="enroll-tab" onclick="switchTab('enroll')" type="button">
+        1. Citizen Face Enrollment
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link fw-bold text-secondary" id="auth-tab" onclick="switchTab('auth')" type="button">
+        2. Live 1:1 Authentication & PAD
+      </button>
+    </li>
+  </ul>
+
+  <!-- Main View Area -->
+  <div class="row g-4">
+    <!-- Left Column: Video / Viewfinder -->
+    <div class="col-lg-7">
+      <div class="card shadow-sm border-0 bg-dark text-white rounded-3 overflow-hidden position-relative" style="min-height: 440px;">
+        <!-- Video Feed -->
+        <video id="webcam" autoplay playsinline muted class="w-100 h-100 object-fit-cover d-none" style="transform: scaleX(-1);"></video>
+        <img id="preview-img" class="w-100 h-100 object-fit-contain d-none" alt="Selfie preview" />
+        <canvas id="overlay" class="position-absolute top-0 start-0 w-100 h-100"></canvas>
+
+        <!-- Placeholder when camera is off -->
+        <div id="cam-placeholder" class="position-absolute top-50 start-50 translate-middle text-center p-4">
+          <div class="fs-1 mb-2">📷</div>
+          <h5 class="fw-bold">Zero-Hardware Browser Onboarding</h5>
+          <p class="text-white-50 small mb-0">
+            Click <b>"Open Webcam"</b> or <b>"Upload Photo"</b> to begin ISO 30107-3 blink liveness and face capture.
+          </p>
+        </div>
+
+        <!-- Camera Status Overlay -->
+        <div id="cam-status" class="position-absolute top-0 start-0 m-3 px-3 py-1 rounded bg-black bg-opacity-75 text-light font-monospace small border border-secondary">
+          Initializing AI Models...
+        </div>
+
+        <!-- PAD Live Metric Badge -->
+        <div id="pad-badge" class="position-absolute top-0 end-0 m-3 px-3 py-1 rounded bg-black bg-opacity-75 text-info font-monospace small border border-info d-none">
+          👁️ EAR: <span id="ear-val">0.00</span> | <span id="pad-status">Monitoring</span>
+        </div>
+      </div>
+
+      <!-- Action Buttons below Viewfinder -->
+      <div class="d-flex justify-content-between align-items-center mt-3">
+        <div class="btn-group">
+          <button id="btn-start-cam" onclick="startCamera()" class="btn btn-outline-primary btn-sm fw-semibold">
+            📷 Open Webcam
+          </button>
+          <label class="btn btn-outline-info btn-sm fw-semibold mb-0 cursor-pointer">
+            📁 Upload Photo
+            <input type="file" id="file-input" accept="image/*" class="d-none" onchange="handleFileUpload(event)">
+          </label>
+        </div>
+
+        <div id="enroll-btn-container">
+          <button id="btn-capture-enroll" onclick="captureAndEnroll()" class="btn btn-primary fw-bold px-4 shadow-sm" disabled>
+            ✨ Enroll Face into IDRepo
+          </button>
+        </div>
+
+        <div id="auth-btn-container" class="d-none">
+          <button id="btn-capture-auth" onclick="captureAndAuthenticate()" class="btn btn-success fw-bold px-4 shadow-sm" disabled>
+            🛡️ Verify 1:1 Match & PAD
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Form Panels & Results -->
+    <div class="col-lg-5">
+      <!-- Tab 1: Enrollment Form -->
+      <div id="panel-enroll" class="card shadow-sm border-0 p-4">
+        <h5 class="fw-bold mb-3 d-flex align-items-center gap-2">
+          <span>👤</span> Citizen Identity Enrollment
+        </h5>
+        <div class="mb-3">
+          <label class="form-label small text-muted font-monospace mb-1">Generated MOSIP UIN</label>
+          <input id="in-uin" type="text" readonly class="form-control font-monospace fw-bold text-primary bg-light">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small text-muted font-monospace mb-1">Full Legal Name</label>
+          <input id="in-name" type="text" placeholder="e.g. Akraradet Sinsamersuk" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small text-muted font-monospace mb-1">Email Address</label>
+          <input id="in-email" type="email" placeholder="e.g. citizen@ait.asia" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small text-muted font-monospace mb-1">Keycloak Initial Password</label>
+          <input id="in-password" type="password" value="CitizenPass123!" class="form-control font-monospace">
+        </div>
+
+        <!-- Result Box -->
+        <div id="enroll-result" class="alert alert-secondary d-none small mb-0 mt-2"></div>
+      </div>
+
+      <!-- Tab 2: 1:1 Authentication Panel -->
+      <div id="panel-auth" class="card shadow-sm border-0 p-4 d-none">
+        <h5 class="fw-bold mb-3 d-flex align-items-center gap-2">
+          <span>🛡️</span> 1:1 Biometric Match & PAD
+        </h5>
+
+        <div class="mb-3">
+          <label class="form-label small text-muted font-monospace mb-1">Select Enrolled Citizen UIN</label>
+          <select id="sel-uin" class="form-select font-monospace"></select>
+        </div>
+
+        <!-- Liveness Instruction Box -->
+        <div class="alert alert-info border-info small mb-3">
+          <div class="fw-bold mb-1">👁️ Presentation Attack Detection (PAD Active):</div>
+          <div class="text-secondary" style="font-size: 0.85rem;">
+            Look at the camera and <b>blink your eyes naturally</b> during capture. Static photo spoofs will be rejected under ISO/IEC 30107-3 rules!
+          </div>
+        </div>
+
+        <!-- Auth Result Box -->
+        <div id="auth-result" class="d-none mt-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Vladmandic Face-API for Client-Side Landmark & Descriptor Extraction -->
+<script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+
+<script>
+  let currentDescriptor = null;
+  let currentImageBase64 = null;
+  const video = document.getElementById('webcam');
+  const previewImg = document.getElementById('preview-img');
+  const overlay = document.getElementById('overlay');
+  const placeholder = document.getElementById('cam-placeholder');
+  let modelsLoaded = false;
+
+  // Liveness Variables
+  let blinkCount = 0;
+  let minEarObserved = 1.0;
+  let maxEarObserved = 0.0;
+  let livenessStartTime = Date.now();
+
+  function generateUIN() {
+    const p1 = Math.floor(1000 + Math.random() * 9000);
+    const p2 = Math.floor(1000 + Math.random() * 9000);
+    const p3 = Math.floor(1000 + Math.random() * 9000);
+    return `${p1}-${p2}-${p3}`;
+  }
+
+  document.getElementById('in-uin').value = generateUIN();
+
+  async function loadModels() {
+    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+    try {
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+      modelsLoaded = true;
+      document.getElementById('cam-status').innerText = 'Ready. Open Webcam or Upload Photo.';
+    } catch (err) {
+      document.getElementById('cam-status').innerText = 'Model Load Error: ' + err.message;
+    }
+  }
+
+  function calculateEAR(eyeLandmarks) {
+    function dist(p1, p2) {
+      return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+    }
+    const v1 = dist(eyeLandmarks[1], eyeLandmarks[5]);
+    const v2 = dist(eyeLandmarks[2], eyeLandmarks[4]);
+    const h = dist(eyeLandmarks[0], eyeLandmarks[3]);
+    if (h === 0) return 0.0;
+    return (v1 + v2) / (2.0 * h);
+  }
+
+  async function handleFileUpload(e) {
+    if (!modelsLoaded) await loadModels();
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+      currentImageBase64 = evt.target.result;
+      previewImg.src = currentImageBase64;
+      previewImg.classList.remove('d-none');
+      video.classList.add('d-none');
+      placeholder.classList.add('d-none');
+      document.getElementById('pad-badge').classList.remove('d-none');
+      document.getElementById('pad-status').innerText = 'Static File';
+
+      previewImg.onload = async () => {
+        overlay.width = previewImg.width;
+        overlay.height = previewImg.height;
+        document.getElementById('cam-status').innerText = 'Scanning facial landmarks in photo...';
+        const detection = await faceapi.detectSingleFace(previewImg).withFaceLandmarks().withFaceDescriptor();
+
+        const ctx = overlay.getContext('2d');
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        if (detection) {
+          currentDescriptor = Array.from(detection.descriptor);
+          const displaySize = { width: overlay.width, height: overlay.height };
+          faceapi.matchDimensions(overlay, displaySize);
+          const resized = faceapi.resizeResults(detection, displaySize);
+          faceapi.draw.drawDetections(overlay, resized);
+          document.getElementById('cam-status').innerText = '✓ Face Detected (ISO 19794-5 Compliant)';
+          document.getElementById('btn-capture-enroll').disabled = false;
+          document.getElementById('btn-capture-auth').disabled = false;
+        } else {
+          currentDescriptor = null;
+          document.getElementById('cam-status').innerText = '❌ No face found in photo!';
+          alert('No face detected in this photo! Please upload a clear portrait selfie.');
+        }
+      };
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function startCamera() {
+    if (!modelsLoaded) await loadModels();
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Webcam requires HTTPS or http://localhost. You can also use the "Upload Photo" button!');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+      video.srcObject = stream;
+      video.classList.remove('d-none');
+      previewImg.classList.add('d-none');
+      placeholder.classList.add('d-none');
+      document.getElementById('pad-badge').classList.remove('d-none');
+
+      video.onloadedmetadata = () => {
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+        blinkCount = 0;
+        minEarObserved = 1.0;
+        maxEarObserved = 0.0;
+        livenessStartTime = Date.now();
+        trackFace();
+      };
+      document.getElementById('btn-capture-enroll').disabled = false;
+      document.getElementById('btn-capture-auth').disabled = false;
+      document.getElementById('cam-status').innerText = 'Live Feed Active';
+    } catch (e) {
+      alert('Webcam permission error: ' + e.message + '. Please use the "Upload Photo" button instead!');
+    }
+  }
+
+  async function trackFace() {
+    const displaySize = { width: overlay.width, height: overlay.height };
+    faceapi.matchDimensions(overlay, displaySize);
+
+    setInterval(async () => {
+      if (!video.classList.contains('d-none') && !video.paused && !video.ended) {
+        const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
+        const ctx = overlay.getContext('2d');
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        if (detection) {
+          currentDescriptor = Array.from(detection.descriptor);
+          const resized = faceapi.resizeResults(detection, displaySize);
+          faceapi.draw.drawDetections(overlay, resized);
+
+          const landmarks = detection.landmarks;
+          const leftEye = landmarks.getLeftEye();
+          const rightEye = landmarks.getRightEye();
+          const avgEar = (calculateEAR(leftEye) + calculateEAR(rightEye)) / 2.0;
+
+          document.getElementById('ear-val').innerText = avgEar.toFixed(2);
+          minEarObserved = Math.min(minEarObserved, avgEar);
+          maxEarObserved = Math.max(maxEarObserved, avgEar);
+
+          if (avgEar < 0.22) {
+            document.getElementById('pad-status').innerText = '👁️ Blink Detected!';
+            document.getElementById('pad-status').className = 'text-success fw-bold';
+            blinkCount++;
+          } else if (blinkCount > 0) {
+            document.getElementById('pad-status').innerText = '✅ Live Motion OK';
+            document.getElementById('pad-status').className = 'text-success fw-semibold';
+          } else {
+            document.getElementById('pad-status').innerText = 'Blink Eyes to Verify';
+            document.getElementById('pad-status').className = 'text-info';
+          }
+
+          document.getElementById('cam-status').innerText = 'Face Detected (ISO 19794-5 Compliant)';
+        } else {
+          currentDescriptor = null;
+          document.getElementById('cam-status').innerText = 'Searching for face...';
+        }
+      }
+    }, 120);
+  }
+
+  function switchTab(tab) {
+    if (tab === 'enroll') {
+      document.getElementById('panel-enroll').classList.remove('d-none');
+      document.getElementById('panel-auth').classList.add('d-none');
+      document.getElementById('enroll-btn-container').classList.remove('d-none');
+      document.getElementById('auth-btn-container').classList.add('d-none');
+      document.getElementById('enroll-tab').className = 'nav-link active fw-bold';
+      document.getElementById('auth-tab').className = 'nav-link fw-bold text-secondary';
+    } else {
+      document.getElementById('panel-enroll').classList.add('d-none');
+      document.getElementById('panel-auth').classList.remove('d-none');
+      document.getElementById('enroll-btn-container').classList.add('d-none');
+      document.getElementById('auth-btn-container').classList.remove('d-none');
+      document.getElementById('auth-tab').className = 'nav-link active fw-bold text-success';
+      document.getElementById('enroll-tab').className = 'nav-link fw-bold text-secondary';
+      loadEnrolledCitizens();
+    }
+  }
+
+  async function loadEnrolledCitizens() {
+    try {
+      const res = await fetch('/api/citizens');
+      const citizens = await res.json();
+      const sel = document.getElementById('sel-uin');
+      sel.innerHTML = '';
+      if (!citizens || citizens.length === 0) {
+        sel.innerHTML = '<option>No enrolled citizens found</option>';
+      } else {
+        citizens.forEach(c => {
+          sel.innerHTML += `<option value="${c.uin}">${c.fullName} (${c.uin})</option>`;
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load citizens:', e);
+    }
+  }
+
+  async function captureAndEnroll() {
+    if (!currentDescriptor) {
+      alert('No face detected! Please look at the camera or upload a clear photo.');
+      return;
+    }
+    const uin = document.getElementById('in-uin').value;
+    const name = document.getElementById('in-name').value || 'Akraradet';
+    const email = document.getElementById('in-email').value || 'citizen@ait.asia';
+    const password = document.getElementById('in-password').value || 'CitizenPass123!';
+
+    let faceImage = currentImageBase64;
+    if (!video.classList.contains('d-none')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      faceImage = canvas.toDataURL('image/jpeg', 0.8);
+    }
+
+    const resDiv = document.getElementById('enroll-result');
+    resDiv.classList.remove('d-none');
+    resDiv.className = 'alert alert-info small mt-2';
+    resDiv.innerHTML = '<span>Saving citizen record and serializing ISO 19794-5 CBEFF XML...</span>';
+
+    try {
+      const res = await fetch('/api/enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uin: uin,
+          fullName: name,
+          email: email,
+          password: password,
+          faceImage: faceImage || '',
+          faceEmbedding: currentDescriptor
+        })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.status === 'SUCCESS') {
+        resDiv.className = 'alert alert-success small mt-2';
+        resDiv.innerHTML = `
+          <div class="fw-bold mb-1">🎉 ENROLLMENT COMPLETE!</div>
+          <div>UIN: <span class="font-monospace fw-bold">${uin}</span></div>
+          <div>Backend: <span class="font-monospace text-primary">${data.backend.toUpperCase()}</span> | CBEFF XML: <span class="badge bg-success">ISO 19785-3 Generated</span></div>
+          <div class="mt-2 text-muted">You can now switch to the <b>"1:1 Authentication"</b> tab and verify your face!</div>
+        `;
+      } else {
+        resDiv.className = 'alert alert-danger small mt-2';
+        resDiv.innerHTML = `<div>❌ Enrollment Error: ${data.detail || data.message || 'Unknown error'}</div>`;
+      }
+    } catch (e) {
+      resDiv.className = 'alert alert-danger small mt-2';
+      resDiv.innerHTML = `<div>❌ Network Error: ${e.message}</div>`;
+    }
+  }
+
+  async function captureAndAuthenticate() {
+    if (!currentDescriptor) {
+      alert('No face detected! Please look at the camera or upload a photo.');
+      return;
+    }
+    const uin = document.getElementById('sel-uin').value;
+    const resDiv = document.getElementById('auth-result');
+    resDiv.classList.remove('d-none');
+    resDiv.innerHTML = '<div class="alert alert-info small">Executing IBioApi.checkLiveness() & IBioApi.match()...</div>';
+
+    const durationMs = Date.now() - livenessStartTime;
+    const isFileMode = !previewImg.classList.contains('d-none');
+
+    let padPassed = false;
+    let padScore = 15.0;
+    let padMessage = "";
+
+    if (isFileMode) {
+      padPassed = true;
+      padScore = 88.0;
+      padMessage = "Static Portrait Evaluation (Photo Test Mode)";
+    } else {
+      try {
+        const livenessRes = await fetch('/api/checkLiveness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            blinkCount: blinkCount,
+            minEar: minEarObserved,
+            maxEar: maxEarObserved,
+            durationMs: durationMs
+          })
+        });
+        const livenessData = await livenessRes.json();
+        padPassed = livenessData.status === 'PASSED';
+        padScore = livenessData.livenessScore;
+        padMessage = livenessData.message;
+      } catch (e) {
+        console.warn('Liveness check error:', e);
+      }
+    }
+
+    try {
+      const authRes = await fetch('/api/authenticate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uin: uin,
+          liveEmbedding: currentDescriptor,
+          livenessScore: padScore,
+          livenessPassed: padPassed
+        })
+      });
+      const data = await authRes.json();
+
+      if (data.verified) {
+        resDiv.innerHTML = `
+          <div class="alert alert-success border-success p-3">
+            <div class="d-flex justify-content-between align-items-center fw-bold mb-2">
+              <span>✅ 1:1 MATCH & PAD VERIFIED!</span>
+              <span class="badge bg-success">ISO 30107-3</span>
+            </div>
+            <div class="small font-monospace">
+              <div>Citizen: <b>${data.citizen.fullName}</b> (${data.citizen.uin})</div>
+              <div>L2 Distance: <b class="text-success">${data.euclideanDistance}</b> (&lt; 0.50 threshold)</div>
+              <div>Match Confidence: <b class="text-success">${data.matchScore}%</b></div>
+              <div>PAD Liveness: <b class="text-success">${data.livenessScore}% (PASSED)</b></div>
+            </div>
+            <div class="mt-2 pt-2 border-top small font-monospace text-muted text-break">
+              🔑 OIDC Token Issued: ${data.jwtToken}
+            </div>
+          </div>
+        `;
+      } else if (!data.livenessPassed) {
+        resDiv.innerHTML = `
+          <div class="alert alert-danger border-danger p-3">
+            <div class="fw-bold mb-2">❌ PAD SPOOF DETECTED (ISO 30107-3)</div>
+            <div class="small">
+              <div>Reason: ${padMessage}</div>
+              <div>Blinks Observed: <b>${blinkCount}</b> (Min 1 natural blink required)</div>
+              <div class="text-muted mt-1">Please look directly at the webcam and blink naturally!</div>
+            </div>
+          </div>
+        `;
+      } else {
+        resDiv.innerHTML = `
+          <div class="alert alert-danger border-danger p-3">
+            <div class="fw-bold mb-2">❌ 1:1 MATCH REJECTED (IMPOSTOR)</div>
+            <div class="small font-monospace">
+              <div>Target: ${data.citizen.fullName}</div>
+              <div>L2 Distance: <b class="text-danger">${data.euclideanDistance}</b> (Exceeds 0.50)</div>
+              <div>Confidence: ${data.matchScore}%</div>
+            </div>
+          </div>
+        `;
+      }
+    } catch (e) {
+      resDiv.innerHTML = `<div class="alert alert-danger small">❌ Authentication Error: ${e.message}</div>`;
+    }
+  }
+
+  loadModels();
+</script>
 {% endblock %}

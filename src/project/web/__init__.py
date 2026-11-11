@@ -1,8 +1,11 @@
 from fastapi import FastAPI
 from project.web.router import router as web_router
-app = FastAPI()
+from project.register_id.api import router as register_id_router
+
+app = FastAPI(title="DPI Citizen Registration Gateway (register-id)")
 
 app.include_router(web_router)
+app.include_router(register_id_router)
 
 import uvicorn
 from typer import Typer

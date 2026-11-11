@@ -107,8 +107,9 @@ bash scripts/check.sh
 
 ## 📚 Detailed Documentation (`docs/`)
 
-Technical details and component guides are organized in [`docs/`](docs/):
+Technical details, architecture specifications, and implementation schedules are organized in [`docs/`](docs/):
 
+- **[Objectives & Weekly Milestones](docs/objectives-and-milestones.md)**: Implementation goals, system architecture, RACI matrix, and 8-week delivery milestones (Weeks 1–8).
 - **[Django Modular Apps](docs/django.md)**: Reusable app architecture, `django_manage.py`, migrations, and settings.
 - **[FastAPI & Web Service](docs/fastapi-web.md)**: REST endpoints, Jinja2 templates, `/health` check, and routing.
 - **[Celery & Background Tasks](docs/celery-processor.md)**: Asynchronous task queuing, Redis configuration, and process supervision.

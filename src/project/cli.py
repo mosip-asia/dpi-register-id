@@ -16,14 +16,20 @@ _PROJECT_NAME = os.environ["PROJECT_NAME"]
 from project.processor import cli as processor_cli
 from project.processor_celery import cli as processor_celery_cli
 from project.web import cli as web_cli
+from project.register_id import cli as register_id_cli
 
 cli = typer.Typer()
+cli.add_typer(
+    register_id_cli,
+    name="register_id",
+    help="Citizen Registration Gateway: manage citizens, IDRepo & liveness.",
+)
 cli.add_typer(processor_cli, 
               name="processor",
-              help="The processor module.")
+              help="The processor module (demo/tutorial).")
 cli.add_typer(processor_celery_cli, 
               name="processor_celery",
-              help="The processory module that will use celery as Queue")
+              help="The processory module that will use celery as Queue (demo/tutorial)")
 cli.add_typer(web_cli, name="web", help="The cli for web module")
 
 @cli.command()
