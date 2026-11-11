@@ -5,7 +5,7 @@ Evaluates Eye Aspect Ratio (EAR) dynamics and active blink patterns
 to distinguish living human faces from static photographs and digital replays.
 """
 
-from project.register_id.models import LivenessRequest, LivenessResponse
+from register_id.models import LivenessRequest, LivenessResponse
 
 
 def evaluate_liveness(req: LivenessRequest) -> LivenessResponse:

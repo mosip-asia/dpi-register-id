@@ -14,7 +14,7 @@ def list_citizens(limit: int = 20):
     """
     List enrolled citizens in the IDRepo database.
     """
-    from project.register_id.idrepo import get_idrepo_client
+    from register_id.idrepo import get_idrepo_client
 
     idrepo = get_idrepo_client()
     citizens = idrepo.list_citizens(limit=limit)
@@ -41,7 +41,7 @@ def show_citizen(uin: str):
     """
     Display citizen demographic and biometric details.
     """
-    from project.register_id.idrepo import get_idrepo_client
+    from register_id.idrepo import get_idrepo_client
 
     idrepo = get_idrepo_client()
     citizen = idrepo.get_citizen(uin)
@@ -61,7 +61,7 @@ def check_backend():
     """
     Verify identity repository database connectivity.
     """
-    from project.register_id.idrepo import get_idrepo_client
+    from register_id.idrepo import get_idrepo_client
 
     idrepo = get_idrepo_client()
     print(f"IDRepo active backend: [bold green]{idrepo.active_backend.upper()}[/bold green]")

@@ -16,7 +16,7 @@ _PROJECT_NAME = os.environ["PROJECT_NAME"]
 from project.processor import cli as processor_cli
 from project.processor_celery import cli as processor_celery_cli
 from project.web import cli as web_cli
-from project.register_id import cli as register_id_cli
+from register_id import cli as register_id_cli
 
 cli = typer.Typer()
 cli.add_typer(

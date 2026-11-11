@@ -1,6 +1,6 @@
 import pytest
-from project.register_id.liveness import evaluate_liveness
-from project.register_id.models import LivenessRequest
+from register_id.liveness import evaluate_liveness
+from register_id.models import LivenessRequest
 
 
 def test_evaluate_liveness_success():

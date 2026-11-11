@@ -113,7 +113,7 @@ gantt
   - [x] Configure repository metadata, package name (`register-id`), and Typer CLI entrypoints in [`pyproject.toml`](../pyproject.toml).
   - [x] Integrate PostgreSQL (`psycopg2-binary`) and HTTP (`requests`) dependencies with `uv`.
   - [x] Define environment variables for IDRepo and Keycloak in [`.env.example`](../.env.example).
-  - [x] Modularize core processor logic into `src/project/processor/` (`liveness.py`, `matcher.py`, `idrepo.py`, `keycloak.py`).
+  - [x] Modularize core gateway logic into `src/register_id/` (`liveness.py`, `matcher.py`, `idrepo.py`, `keycloak.py`, `cbeff.py`, `api.py`).
   - [x] Verify baseline test suite passing: `bash scripts/check.sh`.
 * **Exit Criteria:** Clean repo structure; green CI; CLI runs `uv run register-id --help`.
 
@@ -134,7 +134,7 @@ gantt
 ### Week 3 (25 Nov – 01 Dec 2026): CBEFF XML & ISO 19794-5 Serialization
 * **Focus:** Transforming webcam frames into standardized biometric envelopes acceptable by MOSIP IDRepo and IDA.
 * **Deliverables:**
-  - [ ] Implement ISO/IEC 19794-5 face record packaging (`src/project/processor/cbeff.py`):
+  - [ ] Implement ISO/IEC 19794-5 face record packaging (`src/register_id/cbeff.py`):
     * Binary record header with `FAC\0` format identifier and version `010`.
     * Facial feature points (eye center, nose tip) and boundary dimensions.
     * Base64-encoded compressed JPEG payload.
@@ -150,9 +150,9 @@ gantt
 ### Week 4 (02 Dec – 08 Dec 2026): MOSIP IDRepo & Keycloak IAM Integration
 * **Focus:** Connecting the gateway backend to the identity storage and IAM services.
 * **Deliverables:**
-  - [ ] Implement direct PostgreSQL client in `src/project/processor/idrepo.py` supporting `mosip_idrepo.citizen_identity`.
+  - [ ] Implement direct PostgreSQL client in `src/register_id/idrepo.py` supporting `mosip_idrepo.citizen_identity`.
   - [ ] Implement REST client for upstream MOSIP IDRepo `POST /idrepository/v1/identity` using service tokens (`mosip-idrepo-client`).
-  - [ ] Implement Keycloak IAM bridge in `src/project/processor/keycloak.py`:
+  - [ ] Implement Keycloak IAM bridge in `src/register_id/keycloak.py`:
     * Admin token acquisition via `client_id: admin-cli`.
     * User account creation in `mosip` realm with `uin`, name, email, and password.
     * Attribution of `individualBiometrics: VALID` claim.
@@ -182,7 +182,7 @@ gantt
   - [ ] Enforce HTTPS termination and Content Security Policy (CSP) for WebRTC permissions.
   - [ ] Enforce data hygiene: verify that raw citizen face images are never written to disk or committed to Git (`scripts/check-data-guard.sh`).
   - [ ] Implement Celery worker tasks for asynchronous background auditing and cleanup (`src/project/processor_celery/`).
-  - [ ] Achieve $> 85\%$ test coverage across all processor modules.
+  - [ ] Achieve $> 85\%$ test coverage across all register_id modules.
 * **Exit Criteria:** Penetration and replay resistance checks pass; data guard cleanly verifies zero PII leaks.
 
 ---

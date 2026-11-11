@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from project.web.router import router as web_router
-from project.register_id.api import router as register_id_router
+from register_id.api import router as register_id_router
 
 app = FastAPI(title="DPI Citizen Registration Gateway (register-id)")
 

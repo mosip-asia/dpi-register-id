@@ -1,5 +1,5 @@
 import pytest
-from project.register_id.matcher import (
+from register_id.matcher import (
     compute_cosine_similarity,
     compute_euclidean_distance,
     match_embeddings,

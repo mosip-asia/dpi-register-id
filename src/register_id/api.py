@@ -8,12 +8,12 @@ Exposes endpoints for citizen enrollment, ISO 30107-3 PAD liveness,
 import json
 import logging
 from fastapi import APIRouter, HTTPException
-from project.register_id.cbeff import build_cbeff_xml, extract_jpeg_bytes
-from project.register_id.idrepo import get_idrepo_client
-from project.register_id.keycloak import get_keycloak_client
-from project.register_id.liveness import evaluate_liveness
-from project.register_id.matcher import match_embeddings
-from project.register_id.models import (
+from register_id.cbeff import build_cbeff_xml, extract_jpeg_bytes
+from register_id.idrepo import get_idrepo_client
+from register_id.keycloak import get_keycloak_client
+from register_id.liveness import evaluate_liveness
+from register_id.matcher import match_embeddings
+from register_id.models import (
     AuthRequest,
     AuthResponse,
     CitizenSummary,

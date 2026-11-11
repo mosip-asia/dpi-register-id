@@ -1,6 +1,6 @@
 import base64
 import pytest
-from project.register_id.cbeff import (
+from register_id.cbeff import (
     build_cbeff_xml,
     build_iso19794_5_record,
     extract_jpeg_bytes,

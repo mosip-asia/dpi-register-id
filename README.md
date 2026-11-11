@@ -145,8 +145,8 @@ Technical details, architecture specifications, and implementation schedules are
 ├── notebooks/                   # Jupyter notebooks (0-starter.ipynb)
 ├── scripts/                     # Automation, release, and deployment scripts
 ├── src/
+│   ├── register_id/             # Citizen Registration Gateway (Liveness, Matcher, CBEFF, IDRepo, Keycloak)
 │   ├── project/                 # Core application package
-│   │   ├── register_id/         # Citizen Registration Gateway (Liveness, Matcher, CBEFF, IDRepo)
 │   │   ├── web/                 # FastAPI routes, templates, WebRTC viewfinder
 │   │   ├── processor/           # Processor module (demo/tutorial)
 │   │   └── processor_celery/    # Async background task processors (demo/tutorial)

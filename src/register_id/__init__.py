@@ -5,15 +5,15 @@ Provides zero-hardware citizen onboarding, ISO 30107-3 PAD liveness,
 ISO 19794-5 / ISO 19785-3 CBEFF biometric packaging, and MOSIP IDRepo / Keycloak IAM integration.
 """
 
-from project.register_id.api import router
-from project.register_id.cli import cli
-from project.register_id.liveness import evaluate_liveness
-from project.register_id.matcher import (
+from register_id.api import router
+from register_id.cli import cli
+from register_id.liveness import evaluate_liveness
+from register_id.matcher import (
     compute_cosine_similarity,
     compute_euclidean_distance,
     match_embeddings,
 )
-from project.register_id.models import (
+from register_id.models import (
     AuthRequest,
     AuthResponse,
     CitizenSummary,
