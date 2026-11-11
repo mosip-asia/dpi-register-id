@@ -119,6 +119,7 @@ bash scripts/check.sh
 Technical details, architecture specifications, and implementation schedules are organized in [`docs/`](docs/):
 
 ### 🏛️ Architecture & Project Operations
+- **[Hands-On User Manual & POC Guide](docs/user-manual.md)**: Step-by-step developer guide to spin up the stack, test WebRTC liveness, enroll citizen biometrics, verify 1:1 match, and test spoof rejection.
 - **[Objectives & Weekly Milestones](docs/objectives-and-milestones.md)**: Implementation goals, system architecture, RACI matrix, and 8-week delivery milestones (Weeks 1–8).
 - **[CI/CD & Deployment Guide](docs/deployment.md)**: Multi-environment deployment pipeline (`cd.yml`), NetBird VPN mesh, Traefik reverse proxy overlay, and automated rollbacks.
 - **[AI Agent Invariants (`AGENTS.md`)](AGENTS.md)**: Operational invariants and architectural guidelines for AI coding assistants.

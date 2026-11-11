@@ -6,7 +6,17 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class LivenessChallenge(BaseModel):
+    challengeId: str = Field(..., description="Unique nonce identifier for this liveness session")
+    action: str = Field(default="BLINK_TWICE", description="Requested interactive anti-replay action")
+    targetBlinks: int = Field(default=2, description="Number of blinks required")
+    timeLimitSeconds: int = Field(default=10, description="Validity window for the challenge in seconds")
+    prompt: str = Field(default="Please blink 2 times within 10 seconds", description="User guidance prompt")
+    createdAt: float = Field(..., description="Timestamp of challenge issuance")
+
+
 class LivenessRequest(BaseModel):
+    challengeId: str | None = Field(default=None, description="Optional active challenge nonce")
     blinkCount: int = Field(..., ge=0, description="Observed natural blink count")
     minEar: float = Field(..., ge=0.0, le=1.0, description="Minimum Eye Aspect Ratio observed")
     maxEar: float = Field(..., ge=0.0, le=1.0, description="Maximum Eye Aspect Ratio observed")
