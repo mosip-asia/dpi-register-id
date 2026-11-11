@@ -296,9 +296,11 @@
         overlay.width = video.videoWidth;
         overlay.height = video.videoHeight;
         blinkCount = 0;
+        challengeBlinks = 0;
         minEarObserved = 1.0;
         maxEarObserved = 0.0;
         livenessStartTime = Date.now();
+        fetchLivenessChallenge();
         trackFace();
       };
       document.getElementById('btn-capture-enroll').disabled = false;
@@ -333,10 +335,22 @@
           minEarObserved = Math.min(minEarObserved, avgEar);
           maxEarObserved = Math.max(maxEarObserved, avgEar);
 
-          if (avgEar < 0.22) {
+          if (avgEar < 0.22 && Date.now() - lastBlinkTime > 350) {
+            lastBlinkTime = Date.now();
+            blinkCount++;
+            if (activeChallenge) {
+              challengeBlinks++;
+              const badge = document.getElementById('challenge-badge');
+              if (challengeBlinks >= activeChallenge.targetBlinks) {
+                badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-success font-monospace small border border-success';
+                document.getElementById('challenge-icon').innerText = '✅';
+                document.getElementById('challenge-text').innerText = `Challenge Verified (${challengeBlinks}/${activeChallenge.targetBlinks} blinks)`;
+              } else {
+                document.getElementById('challenge-text').innerText = `Challenge: Blink ${activeChallenge.targetBlinks} times (${challengeBlinks}/${activeChallenge.targetBlinks})`;
+              }
+            }
             document.getElementById('pad-status').innerText = '👁️ Blink Detected!';
             document.getElementById('pad-status').className = 'text-success fw-bold';
-            blinkCount++;
           } else if (blinkCount > 0) {
             document.getElementById('pad-status').innerText = '✅ Live Motion OK';
             document.getElementById('pad-status').className = 'text-success fw-semibold';
@@ -438,6 +452,7 @@
           <div>Backend: <span class="font-monospace text-primary">${data.backend.toUpperCase()}</span> | CBEFF XML: <span class="badge bg-success">ISO 19785-3 Generated</span></div>
           <div class="mt-2 text-muted">You can now switch to the <b>"1:1 Authentication"</b> tab and verify your face!</div>
         `;
+        initUIN();
       } else {
         resDiv.className = 'alert alert-danger small mt-2';
         resDiv.innerHTML = `<div>❌ Enrollment Error: ${data.detail || data.message || 'Unknown error'}</div>`;
@@ -475,6 +490,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            challengeId: activeChallenge ? activeChallenge.challengeId : null,
             blinkCount: blinkCount,
             minEar: minEarObserved,
             maxEar: maxEarObserved,

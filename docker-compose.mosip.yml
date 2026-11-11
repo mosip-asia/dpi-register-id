@@ -29,7 +29,7 @@ services:
       target: runner
     image: ${PROJECT_NAME}:dev
     container_name: ${PROJECT_NAME}-idrepo
-    command: ["python3", "-m", "mock.idrepo"]
+    command: ["/app/.venv/bin/python3", "-m", "mock.idrepo"]
     environment:
       PYTHONPATH: "/app/src"
       POSTGRES_HOST: "postgres"
@@ -41,13 +41,11 @@ services:
       PORT: 8080
     ports:
       - "${MOSIP_IDREPO_PORT}:8080"
-    volumes:
-      - .:/app
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
+      test: ["CMD-SHELL", "/app/.venv/bin/python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 10
