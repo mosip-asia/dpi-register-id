@@ -32,7 +32,7 @@ if not _loaded_file:
 # Ensure essential defaults
 os.environ.setdefault("ENVIRONMENT", _target_env)
 os.environ.setdefault("BUILD_VERSION", "0.1.0-dev")
-os.environ.setdefault("PROJECT_NAME", "python-project-starter")
+os.environ.setdefault("PROJECT_NAME", "register-id")
 os.environ.setdefault("LOG_DIR", "logs/")
 os.environ.setdefault("LOG_NAME", "main.log")
 os.environ.setdefault("LOG_ROTATE_NAME", "main_rotate.log")

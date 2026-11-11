@@ -1,4 +1,4 @@
-# Pre-commit hook configuration for python-project-starter
+# Pre-commit hook configuration for register-id
 # Install hooks locally: uv run pre-commit install
 # Run manually:         uv run pre-commit run --all-files
 

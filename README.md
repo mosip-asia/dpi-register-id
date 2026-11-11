@@ -1,45 +1,69 @@
 <div align="center">
 
-# 🐍 python-project-starter
+# 🪪 register-id
 
-**Standard Python Foundation for AIT Brainlab**
+**DPI Citizen Registration Gateway & Zero-Hardware Onboarding Portal**  
+*Part of the MOSIP Asia Digital Public Infrastructure (DPI) Suite — Agency A: National Identity Authority (`register.id.<domain>`)*
 
-[![CI & Docker Build](https://github.com/AIT-brainlab/python-project-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/AIT-brainlab/python-project-starter/actions/workflows/ci.yml)
-[![Deployment](https://github.com/AIT-brainlab/python-project-starter/actions/workflows/cd.yml/badge.svg)](https://github.com/AIT-brainlab/python-project-starter/actions/workflows/cd.yml)
+[![CI & Docker Build](https://github.com/mosip-asia/dpi-register-id/actions/workflows/ci.yml/badge.svg)](https://github.com/mosip-asia/dpi-register-id/actions/workflows/ci.yml)
+[![Deployment](https://github.com/mosip-asia/dpi-register-id/actions/workflows/cd.yml/badge.svg)](https://github.com/mosip-asia/dpi-register-id/actions/workflows/cd.yml)
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136%2B-009688.svg?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Django](https://img.shields.io/badge/Django-6.0-092E20.svg?style=flat&logo=django&logoColor=white)](https://www.djangoproject.com/)
 [![Celery](https://img.shields.io/badge/Celery-5.6-37814A.svg?style=flat&logo=celery&logoColor=white)](https://docs.celeryq.dev/)
 [![Package Manager: uv](https://img.shields.io/badge/package%20manager-uv-DE5FE9.svg?style=flat&logo=astral&logoColor=white)](https://github.com/astral-sh/uv)
-[![Container: GHCR](https://img.shields.io/badge/registry-GHCR-2496ED.svg?style=flat&logo=docker&logoColor=white)](https://github.com/AIT-brainlab/python-project-starter/pkgs/container/python-project-starter)
+[![Container: GHCR](https://img.shields.io/badge/registry-GHCR-2496ED.svg?style=flat&logo=docker&logoColor=white)](https://github.com/mosip-asia/dpi-register-id/pkgs/container/dpi-register-id)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat)](LICENSE)
 
 </div>
 
 ---
 
-## Mandated Standards
+## 📌 Overview & Architectural Context
 
-1. **Branching Model**:
-   - **`dev` (Default)**: Daily development and feature branches fork/merge here. Pushes do not auto-deploy.
-   - **`stg`**: Staging branch. Promoted via PR from `dev`. Merging triggers automated deployment to the `staging` environment.
-   - **`main`**: Production branch. Promoted via PR from `stg`. Merging triggers automated deployment to the `production` environment.
-2. **Release & GHCR**: Releases are cut from `dev` using `bash scripts/release.sh vX.Y.Z`. Pushing the tag triggers CI tests and builds/pushes Docker images to GitHub Container Registry (`ghcr.io`).
-3. **Environment Configuration**: Strictly one [.env.example](.env.example) template. Local setup is `cp .env.example .env`.
-4. **Data Hygiene**: Never commit spreadsheets, database dumps, or raw PII. Enforced locally and in CI via `bash scripts/check-data-guard.sh`.
+`register-id` serves as the **Citizen Registration Gateway** (`https://register.id.<domain>`) in the MOSIP Asia Digital Public Infrastructure (DPI) architecture. It enables remote, zero-hardware citizen enrollment directly from standard web browsers.
+
+### The Problem
+Upstream MOSIP traditionally requires citizens to enroll in person at physical registration centers using an 800 MB Java desktop application (`mosip/registration-client`) connected to proprietary L0/L1 SBI USB biometric scanners ($500+ each) and processed through 17 batch packet decryption pods (`regproc-*`).
+
+### The Solution: Zero-Hardware Browser Onboarding
+`register-id` replaces the desktop registration barrier with a lightweight, browser-based onboarding flow:
+
+```mermaid
+flowchart TD
+    Citizen["👤 Citizen / Student<br/>(Standard Webcam & Browser)"] -->|"1. Live Webcam Capture"| Viewfinder["Browser Viewfinder (HTML5)<br/>Blink Liveness PAD (ISO 30107-3)"]
+    Viewfinder -->|"2. Validated JPEG Frame"| Gateway["register-id Backend<br/>(FastAPI / Django)"]
+    Gateway -->|"3. Package Biometric Data"| CBEFF["ISO 19794-5 (FAC) Serializer<br/>inside ISO 19785-3 CBEFF XML"]
+    Gateway -->|"4. POST /idrepository/v1/identity"| IDRepo["MOSIP IDRepo (Allocates UIN)"]
+    Gateway -->|"5. Provision Account with UIN"| Keycloak["Keycloak IAM (mosip realm)"]
+    IDRepo & Keycloak -->|"6. Citizen Ready for Auth"| eSignet["eSignet OIDC & Inji Wallet Issuance"]
+```
+
+### Key Architectural Principles
+* **Zero Hardware Barrier:** Works in any modern HTML5/WebRTC-compliant browser without proprietary fingerprint/iris/face capture hardware.
+* **ISO 30107-3 Liveness (PAD):** Client-side presentation attack detection (active blink and motion challenge) to reject static photo, video replay, and deepfake injections.
+* **ISO 19794-5 CBEFF Format:** Encapsulates facial biometric records in standard ISO/IEC 19794-5 (`FAC\0` binary payload) within an ISO 19785-3 CBEFF XML envelope, ensuring 100% upstream interoperability with MOSIP `id-repository`, `id-authentication` (IDA), and the AI-BioSDK matcher.
+* **Direct Substrate Seeding:** Directly interfaces with MOSIP IDRepo (`POST /idrepository/v1/identity`) using internal Keycloak service tokens (`mosip-idrepo-client`), bypassing heavy batch packet pipelines while maintaining exact schema parity.
 
 ---
 
-## Quick Start
+## 🏛️ Mandated Standards & Lifecycle
 
-### 1. Rename Project
-When initializing a new repository from this template:
-1. Update `project.name` in [`pyproject.toml`](pyproject.toml)
-2. Update `PROJECT_NAME` in [`.env.example`](.env.example)
+1. **Branching Model**:
+   - **`dev` (Default)**: Daily development and feature branches fork/merge here. Pushes do not auto-deploy.
+   - **`stg`**: Staging branch. Promoted via PR from `dev` (`bash scripts/release.sh pr stg`). Merging triggers automated deployment to `staging`.
+   - **`main`**: Production branch. Promoted via PR from `stg` (`bash scripts/release.sh pr main`). Merging triggers automated deployment to `production`.
+2. **Release & GHCR**: Releases are cut from `dev` using `bash scripts/release.sh vX.Y.Z`. Pushing the tag triggers CI tests and builds/pushes Docker images to GitHub Container Registry (`ghcr.io/mosip-asia/dpi-register-id`).
+3. **Configuration**: Strictly one [`.env.example`](.env.example) template. Local setup is `cp .env.example .env`.
+4. **Data Hygiene**: Never commit spreadsheets, database dumps, credentials, or raw PII. Enforced locally and in CI via `bash scripts/check-data-guard.sh`.
 
-### 2. Setup Environment
+---
+
+## 🚀 Quick Start
+
+### 1. Setup Environment
 ```bash
-# 1. Create local environment file
+# 1. Create local environment file from template
 cp .env.example .env
 
 # 2. Install dependencies with uv
@@ -47,23 +71,28 @@ uv sync
 ```
 *(VS Code Dev Containers are also supported via `.devcontainer/`)*.
 
-### 3. Run Locally
+### 2. Run Locally
 ```bash
-# Run CLI
-uv run python-project-starter --help
+# Display CLI commands
+uv run register-id --help
 
-# Run Web Server (FastAPI)
-uv run python-project-starter web
+# Run Web Server (FastAPI + Django hybrid runtime)
+uv run register-id web
 # Open: http://localhost:8000
 
 # Run Background Worker (Celery + Redis)
 docker compose up -d redis
-uv run python-project-starter celery worker
+uv run register-id celery worker
+```
+
+### 3. Run Pre-Push Checks
+```bash
+bash scripts/check.sh
 ```
 
 ---
 
-## Operational Scripts (`scripts/`)
+## 🛠️ Operational Scripts (`scripts/`)
 
 | Script | Purpose | Usage |
 |---|---|---|
@@ -76,7 +105,7 @@ uv run python-project-starter celery worker
 
 ---
 
-## Detailed Documentation (`docs/`)
+## 📚 Detailed Documentation (`docs/`)
 
 Technical details and component guides are organized in [`docs/`](docs/):
 
@@ -88,7 +117,7 @@ Technical details and component guides are organized in [`docs/`](docs/):
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 .
@@ -104,18 +133,21 @@ Technical details and component guides are organized in [`docs/`](docs/):
 │   ├── django_core/             # Django dev harness and routing
 │   ├── django_module/           # Reusable Django module example
 │   └── project/                 # Core FastAPI, CLI, logging, and Celery modules
+│       ├── web/                 # FastAPI routes, templates, static assets
+│       ├── processor/           # Business logic & CBEFF processing modules
+│       └── processor_celery/    # Async background task processors
 ├── .env.example                 # Single environment configuration template
 ├── AGENTS.md                    # Operational guidelines for AI agents
 ├── django_manage.py             # Django entrypoint script
 ├── docker-compose.yml           # Unified stack compose (App + Redis)
 ├── docker-compose.traefik.yml   # Traefik overlay for deployed environments
 ├── Dockerfile                   # Multi-stage production container build
-├── pyproject.toml               # Project dependencies and packaging
+├── pyproject.toml               # Project dependencies and packaging (register-id)
 └── README.md
 ```
 
 ---
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

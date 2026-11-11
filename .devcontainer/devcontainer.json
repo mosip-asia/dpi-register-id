@@ -1,5 +1,5 @@
 {
-  "name": "python-project-starter dev",
+  "name": "register-id dev",
   "dockerComposeFile": [
     "../docker-compose.yml",
     "docker-compose.dev.yml"

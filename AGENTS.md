@@ -47,7 +47,7 @@ This document defines the architectural patterns, operational invariants, and wo
   - In remote environments, the server host stores its environment in `.env`.
 * **No Default Fallback Variables in Compose:**
   - Variables in [`docker-compose.yml`](docker-compose.yml) must be explicitly supplied by `.env` (e.g. `${PROJECT_NAME}`, `${REDIS_PASSWORD}`, `${FASTAPI_PORT}`, `${REDIS_PORT}`).
-  - Do not use inline fallbacks like `${PROJECT_NAME:-python-project-starter}` or `${REDIS_PASSWORD:-redispassword}`.
+  - Do not use inline fallbacks like `${PROJECT_NAME:-register-id}` or `${REDIS_PASSWORD:-redispassword}`.
   - Services use explicit `environment:` mappings in `docker-compose.yml` instead of `env_file:` to clearly define container contracts and isolate container networking (e.g. `redis://:${REDIS_PASSWORD}@redis:6379/0`) from host `localhost`.
 * **Traefik Reverse Proxy Overlay:**
   - In local development, the app maps ports directly to `http://localhost:8000` (`COMPOSE_FILE=docker-compose.yml`).

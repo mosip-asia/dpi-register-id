@@ -41,7 +41,7 @@ Configure two environments in GitHub (**Settings > Environments**): `staging` an
 | `SSH_PRIVATE_KEY` | Secret | SSH private key to authenticate against deployment server |
 | `SERVER_HOST` | Variable | Target server IP or NetBird mesh hostname |
 | `SERVER_USER` | Variable | Target server SSH user |
-| `SERVER_PROJECT_DIR` | Variable | Target directory on host (e.g. `/opt/python-project-starter`) |
+| `SERVER_PROJECT_DIR` | Variable | Target directory on host (e.g. `/opt/register-id`) |
 | `NETBIRD_MANAGEMENT_URL` | Variable | *(Optional)* Self-hosted NetBird management URL |
 
 ---

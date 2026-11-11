@@ -40,7 +40,7 @@ docker compose up -d redis
 ### 2. Start Celery Worker
 ```bash
 # Using the Typer CLI
-uv run python-project-starter celery worker
+uv run register-id celery worker
 
 # Or directly via celery
 uv run celery -A project.celery.queue worker --loglevel=info

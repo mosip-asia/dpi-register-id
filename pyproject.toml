@@ -1,7 +1,7 @@
 [project]
-name = "python-project-starter"
+name = "register-id"
 version = "0.1.0"
-description = "Add your description here"
+description = "DPI Citizen Registration Gateway (register.id) for MOSIP Asia"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -32,6 +32,6 @@ dev = [
 package = true
 
 [project.scripts]
-python-project-starter = "project:cli"
+register-id = "project:cli"
 
 

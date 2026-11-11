@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Release and Promotion Helper for python-project-starter
+# Release and Promotion Helper for register-id
 #
 # Three branches / environments:
 #   dev   <- default working branch; release tags v* are cut here

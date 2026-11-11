@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Post-Deployment Smoke Test for python-project-starter
+# Post-Deployment Smoke Test for register-id
 #
 # Validates that the application stack is up, healthy, and operational:
 # 1. Health endpoint check: GET /health (expects status: ok)
-# 2. Web UI endpoint: GET / (expects Python-Starter-Project branding)
+# 2. Web UI endpoint: GET / (expects register-id branding)
 # 3. Dynamic template endpoint: GET /example/1234 (expects id 1234 rendered)
 # 4. Django system check: uv run django_manage.py check (if available)
 #
@@ -55,8 +55,8 @@ INDEX_RESPONSE=$(curl -sf --max-time 10 "$INDEX_URL") || {
   exit 1
 }
 
-if ! echo "$INDEX_RESPONSE" | grep -q "Python-Starter-Project"; then
-  log_fail "Web index response missing expected branding 'Python-Starter-Project':"
+if ! echo "$INDEX_RESPONSE" | grep -q "register-id"; then
+  log_fail "Web index response missing expected branding 'register-id':"
   echo "${INDEX_RESPONSE:0:300}..." >&2
   exit 1
 fi

@@ -1,4 +1,4 @@
-# Base compose stack for python-project-starter (Application + Redis)
+# Base compose stack for register-id (Application + Redis)
 # Works identically for local development, docker compose CLI, and remote deployment.
 
 name: ${PROJECT_NAME}

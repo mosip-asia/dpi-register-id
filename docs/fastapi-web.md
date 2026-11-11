@@ -46,7 +46,7 @@ uv run uvicorn project.web:app --host 0.0.0.0 --port 8000 --reload
 
 ### Via Root CLI
 ```bash
-uv run python-project-starter web
+uv run register-id web
 ```
 
 ### In Docker

@@ -100,4 +100,4 @@ if [[ "$DEPLOY_MODE" == "compose" ]]; then
   docker compose ps
   echo ""
 fi
-echo -e "${GREEN}${BOLD}✅ Deployment of python-project-starter (${TARGET_ENV}) completed successfully!${NC}"
+echo -e "${GREEN}${BOLD}✅ Deployment of register-id (${TARGET_ENV}) completed successfully!${NC}"

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Python-Starter-Project - Index{% endblock %}
+{% block title %}register-id - Citizen Registration Gateway{% endblock %}
 {% block content %}
 	<div class="py-4">
-		<h1>Python-Starter-Project</h1>
+		<h1>register-id</h1>
+		<p class="lead text-muted">DPI Citizen Registration Gateway (MOSIP Asia)</p>
 		<div class="mb-3">
 			<span class="badge {% if environment == 'prod' %}bg-danger{% elif environment == 'stg' %}bg-warning text-dark{% else %}bg-primary{% endif %}">
 				{{ environment | upper }}

@@ -29,7 +29,7 @@ cli.add_typer(web_cli, name="web", help="The cli for web module")
 @cli.command()
 def command_1():
     """
-    This is the default command. You can find this command in `src/python_project_stater/cli.py`.
+    This is the default command. You can find this command in `src/project/cli.py`.
     """
     logging.debug("Calling `command_1`")
     print(f"Welcome to {_PROJECT_NAME}")
