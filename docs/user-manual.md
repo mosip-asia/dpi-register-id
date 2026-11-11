@@ -79,7 +79,8 @@ cp .env.example .env
 
 ### Step 2: Spin Up Full Docker Compose Stack
 ```bash
-docker compose up -d
+# Build local runner image and spin up complete stack
+docker compose up -d --build
 ```
 
 ### Step 3: Verify Running Services

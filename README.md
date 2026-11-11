@@ -73,8 +73,8 @@ uv sync
 
 ### 2. Run with Docker Compose (Full Stack)
 ```bash
-# Spin up complete stack (App + Redis + MOSIP IDRepo Service + PostgreSQL + Keycloak IAM)
-docker compose up -d
+# Build local runner image and spin up complete stack
+docker compose up -d --build
 
 # Open Web Gateway:     http://localhost:8000
 # Open IDRepo Service:  http://localhost:8081

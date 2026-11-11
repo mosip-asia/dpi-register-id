@@ -18,13 +18,33 @@ from register_id.models import (
     AuthResponse,
     CitizenSummary,
     EnrollRequest,
+    LivenessChallenge,
     LivenessRequest,
     LivenessResponse,
 )
+from register_id.liveness import create_liveness_challenge, evaluate_liveness
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["register_id"])
+
+
+@router.get("/idgenerator/uin")
+def generate_uin_endpoint():
+    """
+    Allocates a fresh sovereign citizen UIN via the MOSIP IDRepo service interface.
+    """
+    idrepo = get_idrepo_client()
+    uin = idrepo.generate_uin()
+    return {"uin": uin}
+
+
+@router.post("/liveness/challenge", response_model=LivenessChallenge)
+def create_liveness_challenge_endpoint():
+    """
+    Issues an ephemeral challenge nonce for ISO/IEC 30107-3 Level 2 anti-replay protection.
+    """
+    return create_liveness_challenge()
 
 
 @router.get("/citizens", response_model=list[CitizenSummary])

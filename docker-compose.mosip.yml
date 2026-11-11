@@ -23,9 +23,13 @@ services:
     restart: unless-stopped
 
   idrepo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
     image: ${PROJECT_NAME}:dev
     container_name: ${PROJECT_NAME}-idrepo
-    command: ["uv", "run", "python", "-m", "mock.idrepo"]
+    command: ["python3", "-m", "mock.idrepo"]
     environment:
       POSTGRES_HOST: "postgres"
       POSTGRES_PORT: 5432
@@ -42,7 +46,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")'"]
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 10
