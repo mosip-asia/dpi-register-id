@@ -109,12 +109,15 @@ bash scripts/check.sh
 
 Technical details, architecture specifications, and implementation schedules are organized in [`docs/`](docs/):
 
+### 🏛️ Architecture & Project Operations
 - **[Objectives & Weekly Milestones](docs/objectives-and-milestones.md)**: Implementation goals, system architecture, RACI matrix, and 8-week delivery milestones (Weeks 1–8).
-- **[Django Modular Apps](docs/django.md)**: Reusable app architecture, `django_manage.py`, migrations, and settings.
-- **[FastAPI & Web Service](docs/fastapi-web.md)**: REST endpoints, Jinja2 templates, `/health` check, and routing.
-- **[Celery & Background Tasks](docs/celery-processor.md)**: Asynchronous task queuing, Redis configuration, and process supervision.
 - **[CI/CD & Deployment Guide](docs/deployment.md)**: Multi-environment deployment pipeline (`cd.yml`), NetBird VPN mesh, Traefik reverse proxy overlay, and automated rollbacks.
-- **[AI Agent Invariants (`AGENTS.md`)](AGENTS.md)**: Architectural invariants and guidelines for AI coding assistants.
+- **[AI Agent Invariants (`AGENTS.md`)](AGENTS.md)**: Operational invariants and architectural guidelines for AI coding assistants.
+
+### 🎓 Starter Foundation Tutorials (`docs/tutorial/`)
+- **[FastAPI & Web Service](docs/tutorial/fastapi-web.md)**: REST endpoints, Jinja2 templates, `/health` check, and routing.
+- **[Celery & Background Tasks](docs/tutorial/celery-processor.md)**: Asynchronous task queuing, Redis configuration, and process supervision.
+- **[Django Modular Apps](docs/tutorial/django.md)**: Reusable app architecture, `django_manage.py`, migrations, and settings.
 
 ---
 
@@ -125,19 +128,31 @@ Technical details, architecture specifications, and implementation schedules are
 ├── .devcontainer/               # VS Code Dev Container configuration
 ├── .github/                     # GitHub Actions CI/CD workflows and composite actions
 ├── data/                        # Local data directory (ignored by git)
-├── docs/                        # In-depth module and deployment documentation
+├── docs/                        # Architecture, roadmap & deployment documentation
+│   ├── objectives-and-milestones.md # Core specification & 8-week delivery plan
+│   ├── deployment.md            # CD pipeline, NetBird VPN, Traefik ingress
+│   └── tutorial/                # Foundation tutorials (FastAPI, Celery, Django)
 ├── logs/                        # Application logs (ignored by git)
 ├── models/                      # Model checkpoints and weights (ignored by git)
 ├── notebooks/                   # Jupyter notebooks (0-starter.ipynb)
 ├── scripts/                     # Automation, release, and deployment scripts
 ├── src/
+│   ├── project/                 # Core application package
+│   │   ├── register_id/         # Citizen Registration Gateway (Liveness, Matcher, CBEFF, IDRepo)
+│   │   ├── web/                 # FastAPI routes, templates, WebRTC viewfinder
+│   │   ├── processor/           # Processor module (demo/tutorial)
+│   │   └── processor_celery/    # Async background task processors (demo/tutorial)
 │   ├── django_core/             # Django dev harness and routing
-│   ├── django_module/           # Reusable Django module example
-│   └── project/                 # Core FastAPI, CLI, logging, and Celery modules
-│       ├── web/                 # FastAPI routes, templates, static assets
-│       ├── processor/           # Business logic & CBEFF processing modules
-│       └── processor_celery/    # Async background task processors
+│   └── django_module/           # Reusable Django module example
 ├── .env.example                 # Single environment configuration template
+├── AGENTS.md                    # Operational guidelines for AI agents
+├── django_manage.py             # Django entrypoint script
+├── docker-compose.yml           # Unified stack compose (App + Redis)
+├── docker-compose.traefik.yml   # Traefik overlay for deployed environments
+├── Dockerfile                   # Multi-stage production container build
+├── pyproject.toml               # Project dependencies and packaging (register-id)
+└── README.md
+```
 ├── AGENTS.md                    # Operational guidelines for AI agents
 ├── django_manage.py             # Django entrypoint script
 ├── docker-compose.yml           # Unified stack compose (App + Redis)
