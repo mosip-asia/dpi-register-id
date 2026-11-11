@@ -30,10 +30,10 @@ router = APIRouter(prefix="/api", tags=["register_id"])
 @router.get("/citizens", response_model=list[CitizenSummary])
 def list_citizens():
     """
-    Returns recently enrolled citizens from the IDRepo.
+    Returns recently enrolled citizens from the MOSIP IDRepo REST interface.
     """
     idrepo = get_idrepo_client()
-    citizens = idrepo.list_citizens(limit=50)
+    citizens = idrepo.list_identities(limit=50)
     return [
         CitizenSummary(
             uin=c["uin"],
@@ -48,12 +48,12 @@ def list_citizens():
 @router.get("/citizens/{uin}")
 def get_citizen(uin: str):
     """
-    Retrieves full citizen demographic record by UIN.
+    Retrieves full citizen demographic record by UIN via MOSIP IDRepo REST interface.
     """
     idrepo = get_idrepo_client()
-    citizen = idrepo.get_citizen(uin)
+    citizen = idrepo.get_identity(uin)
     if not citizen:
-        raise HTTPException(status_code=404, detail=f"Citizen UIN '{uin}' not found.")
+        raise HTTPException(status_code=404, detail=f"Citizen UIN '{uin}' not found in IDRepo.")
     return {
         "uin": citizen["uin"],
         "fullName": citizen["full_name"],
@@ -75,9 +75,9 @@ def check_liveness_endpoint(req: LivenessRequest):
 @router.post("/enroll")
 def enroll_citizen_endpoint(req: EnrollRequest):
     """
-    Enrolls a citizen face into MOSIP IDRepo and provisions Keycloak IAM:
+    Enrolls a citizen face through the MOSIP IDRepo REST interface and provisions Keycloak IAM:
     1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
-    2. Stores demographics, face embedding, and CBEFF in IDRepo database.
+    2. Calls MOSIP IDRepo POST /idrepository/v1/identity/ with official JSON envelope.
     3. Asynchronously provisions the citizen account in Keycloak IAM for eSignet OIDC login.
     """
     idrepo = get_idrepo_client()
@@ -90,8 +90,8 @@ def enroll_citizen_endpoint(req: EnrollRequest):
     except Exception as e:
         logger.warning(f"Could not construct CBEFF XML (storing raw data): {e}")
 
-    # 2. Persist to IDRepo
-    saved = idrepo.save_citizen(
+    # 2. Persist to IDRepo via MOSIP REST Interface
+    saved = idrepo.add_identity(
         uin=req.uin,
         full_name=req.fullName,
         email=req.email,
@@ -113,10 +113,10 @@ def enroll_citizen_endpoint(req: EnrollRequest):
 
     return {
         "status": "SUCCESS",
-        "message": "Citizen face enrolled successfully into MOSIP IDRepo",
+        "message": "Citizen face enrolled successfully via MOSIP IDRepo interface",
         "uin": req.uin,
         "fullName": req.fullName,
-        "backend": idrepo.active_backend,
+        "backend": "mosip-idrepo-rest",
         "cbeffGenerated": cbeff_xml is not None,
         "keycloakProvisioned": keycloak_ok,
     }
@@ -126,10 +126,10 @@ def enroll_citizen_endpoint(req: EnrollRequest):
 def authenticate_citizen_endpoint(req: AuthRequest):
     """
     MOSIP BioSDK SPI Contract: IBioApi.match() (1:1 Biometric Verification)
-    Compares stored gallery face descriptor with live probe and enforces ISO 30107-3 PAD.
+    Fetches citizen gallery template from IDRepo REST API and compares with live probe.
     """
     idrepo = get_idrepo_client()
-    citizen = idrepo.get_citizen(req.uin)
+    citizen = idrepo.get_identity(req.uin)
     if not citizen:
         raise HTTPException(status_code=404, detail=f"Citizen UIN '{req.uin}' not found in registry.")
 

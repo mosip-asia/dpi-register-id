@@ -73,12 +73,13 @@ uv sync
 
 ### 2. Run with Docker Compose (Full Stack)
 ```bash
-# Spin up complete stack (App + Redis + PostgreSQL IDRepo + Keycloak IAM)
+# Spin up complete stack (App + Redis + MOSIP IDRepo Service + PostgreSQL + Keycloak IAM)
 docker compose up -d
 
-# Open Web Gateway:    http://localhost:8000
+# Open Web Gateway:     http://localhost:8000
+# Open IDRepo Service:  http://localhost:8081
 # Open Keycloak Admin:  http://localhost:8080 (admin / admin)
-# PostgreSQL IDRepo:    localhost:5432
+# PostgreSQL Database:  localhost:5432
 ```
 
 ### 3. Run Locally with uv (Hybrid Mode)
@@ -145,7 +146,7 @@ Technical details, architecture specifications, and implementation schedules are
 ├── notebooks/                   # Jupyter notebooks (0-starter.ipynb)
 ├── scripts/                     # Automation, release, and deployment scripts
 ├── src/
-│   ├── register_id/             # Citizen Registration Gateway (Liveness, Matcher, CBEFF, IDRepo, Keycloak)
+│   ├── register_id/             # Citizen Registration Gateway (Liveness, Matcher, CBEFF, IDRepo REST Client, Mock IDRepo Service)
 │   ├── project/                 # Core application package
 │   │   ├── web/                 # FastAPI routes, templates, WebRTC viewfinder
 │   │   ├── processor/           # Processor module (demo/tutorial)
@@ -156,7 +157,7 @@ Technical details, architecture specifications, and implementation schedules are
 ├── AGENTS.md                    # Operational guidelines for AI agents
 ├── django_manage.py             # Django entrypoint script
 ├── docker-compose.yml           # Base compose stack (App + Redis)
-├── docker-compose.mosip.yml     # MOSIP local overlay (PostgreSQL IDRepo + Keycloak IAM)
+├── docker-compose.mosip.yml     # MOSIP local overlay (IDRepo REST Service + PostgreSQL + Keycloak IAM)
 ├── docker-compose.traefik.yml   # Traefik overlay for deployed environments
 ├── Dockerfile                   # Multi-stage production container build
 ├── pyproject.toml               # Project dependencies and packaging (register-id)

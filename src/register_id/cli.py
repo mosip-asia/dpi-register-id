@@ -12,14 +12,14 @@ cli = typer.Typer(help="Citizen Registration Gateway CLI commands.")
 @cli.command("list")
 def list_citizens(limit: int = 20):
     """
-    List enrolled citizens in the IDRepo database.
+    List enrolled citizens via the MOSIP IDRepo REST interface.
     """
-    from register_id.idrepo import get_idrepo_client
+    from register_id.idrepo_client import get_idrepo_client
 
     idrepo = get_idrepo_client()
-    citizens = idrepo.list_citizens(limit=limit)
+    citizens = idrepo.list_identities(limit=limit)
 
-    table = Table(title=f"Enrolled Citizens ({idrepo.active_backend.upper()})")
+    table = Table(title=f"Enrolled Citizens via MOSIP IDRepo ({idrepo.base_url})")
     table.add_column("UIN", style="cyan", no_wrap=True)
     table.add_column("Full Name", style="bold")
     table.add_column("Email", style="green")
@@ -39,14 +39,14 @@ def list_citizens(limit: int = 20):
 @cli.command("show")
 def show_citizen(uin: str):
     """
-    Display citizen demographic and biometric details.
+    Display citizen demographic and biometric details from MOSIP IDRepo.
     """
-    from register_id.idrepo import get_idrepo_client
+    from register_id.idrepo_client import get_idrepo_client
 
     idrepo = get_idrepo_client()
-    citizen = idrepo.get_citizen(uin)
+    citizen = idrepo.get_identity(uin)
     if not citizen:
-        print(f"[red]Citizen UIN '{uin}' not found.[/red]")
+        print(f"[red]Citizen UIN '{uin}' not found in IDRepo.[/red]")
         raise typer.Exit(1)
 
     print(f"[bold cyan]Citizen Details ({uin})[/bold cyan]")
@@ -59,9 +59,24 @@ def show_citizen(uin: str):
 @cli.command("check-backend")
 def check_backend():
     """
-    Verify identity repository database connectivity.
+    Verify MOSIP IDRepo REST service and Keycloak connectivity.
     """
-    from register_id.idrepo import get_idrepo_client
+    from register_id.idrepo_client import get_idrepo_client
 
     idrepo = get_idrepo_client()
-    print(f"IDRepo active backend: [bold green]{idrepo.active_backend.upper()}[/bold green]")
+    health = idrepo.check_health()
+    status = health.get("status", "UNKNOWN")
+    color = "green" if status in ("UP", "SUCCESS") else "red"
+    print(f"MOSIP IDRepo Endpoint: [cyan]{idrepo.base_url}[/cyan]")
+    print(f"MOSIP IDRepo Status:   [{color}]{status}[/{color}] (info: {health})")
+
+
+@cli.command("serve-idrepo")
+def serve_idrepo(host: str = "0.0.0.0", port: int = 8080):
+    """
+    Start the MOSIP IDRepo mock REST service container/daemon.
+    """
+    from register_id.mock_idrepo import run_idrepo_server
+
+    print(f"Starting MOSIP IDRepo REST Service on http://{host}:{port} ...")
+    run_idrepo_server(host=host, port=port)

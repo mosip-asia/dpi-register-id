@@ -24,6 +24,20 @@ cli.add_typer(
     name="register_id",
     help="Citizen Registration Gateway: manage citizens, IDRepo & liveness.",
 )
+
+idrepo_cli = typer.Typer(help="MOSIP IDRepo Service utilities.")
+
+
+@idrepo_cli.command("serve")
+def serve_idrepo(host: str = "0.0.0.0", port: int = 8080):
+    """
+    Start the MOSIP IDRepo mock REST service.
+    """
+    from register_id.mock_idrepo import run_idrepo_server
+    run_idrepo_server(host=host, port=port)
+
+
+cli.add_typer(idrepo_cli, name="idrepo", help="MOSIP Identity Repository (REST API service).")
 cli.add_typer(processor_cli, 
               name="processor",
               help="The processor module (demo/tutorial).")

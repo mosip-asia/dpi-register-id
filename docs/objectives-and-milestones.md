@@ -43,8 +43,9 @@ flowchart TD
         CeleryWorker["Celery Worker<br/>(Async Batch Processing)"]
     end
 
-    subgraph MosipSubstrate["3. MOSIP Substrate (Single-VM Profile)"]
-        IDRepo["MOSIP IDRepo<br/>(PostgreSQL mosip_idrepo)"]
+    subgraph MosipSubstrate["3. MOSIP Substrate"]
+        IDRepo["MOSIP IDRepo Service<br/>(POST /idrepository/v1/identity)"]
+        PostgresDB[("PostgreSQL 15<br/>mosip_idrepo schema")]
         IDA["MOSIP IDA<br/>(ida-auth Service)"]
         Keymanager["Keymanager<br/>(SoftHSM Vault)"]
         BioSDK["AI-BioSDK<br/>(MobileFaceNet ONNX >= 0.68)"]
@@ -60,7 +61,8 @@ flowchart TD
     Viewfinder -->|"Compute EAR & Detect Blink"| PAD
     PAD -->|"Validated JPEG + 128-D Embedding"| APIRouter
     APIRouter -->|"Package Biometrics"| CBEFFBuilder
-    CBEFFBuilder -->|"Seed Identity & Allocate UIN"| IDRepo
+    CBEFFBuilder -->|"POST /idrepository/v1/identity"| IDRepo
+    IDRepo -->|"Store Identity & CBEFF"| PostgresDB
     APIRouter -->|"Provision Citizen Account"| Keycloak
     Keycloak -.->|"Authenticate Citizen"| eSignet
     eSignet -.->|"Issue Verifiable Credential"| Wallet
@@ -148,16 +150,16 @@ gantt
 ---
 
 ### Week 4 (02 Dec – 08 Dec 2026): MOSIP IDRepo & Keycloak IAM Integration
-* **Focus:** Connecting the gateway backend to the identity storage and IAM services.
+* **Focus:** Connecting the gateway backend to the identity storage and IAM services via standard REST interfaces.
 * **Deliverables:**
-  - [ ] Implement direct PostgreSQL client in `src/register_id/idrepo.py` supporting `mosip_idrepo.citizen_identity`.
-  - [ ] Implement REST client for upstream MOSIP IDRepo `POST /idrepository/v1/identity` using service tokens (`mosip-idrepo-client`).
-  - [ ] Implement Keycloak IAM bridge in `src/register_id/keycloak.py`:
+  - [x] Implement pure HTTP REST client in `src/register_id/idrepo_client.py` calling MOSIP IDRepo `POST /idrepository/v1/identity` and `GET /idrepository/v1/identity/uin/{uin}`.
+  - [x] Implement dedicated MOSIP IDRepo mock REST service container (`src/register_id/mock_idrepo.py`) in `docker-compose.mosip.yml` with PostgreSQL 15 and SQLite fallback.
+  - [x] Implement Keycloak IAM bridge in `src/register_id/keycloak.py`:
     * Admin token acquisition via `client_id: admin-cli`.
     * User account creation in `mosip` realm with `uin`, name, email, and password.
     * Attribution of `individualBiometrics: VALID` claim.
-  - [ ] Add local Docker Compose mock services for Keycloak and Postgres to facilitate offline testing.
-* **Exit Criteria:** A completed enrollment form creates a verified record in Postgres and an active user in Keycloak.
+  - [x] Add local Docker Compose services for IDRepo, Keycloak, and Postgres with automated schema initialization.
+* **Exit Criteria:** The gateway accesses zero database tables directly; citizen enrollment and lookup are routed strictly through the MOSIP IDRepo REST API.
 
 ---
 

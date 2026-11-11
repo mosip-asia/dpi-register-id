@@ -1,4 +1,4 @@
-# MOSIP Substrate Services Overlay (PostgreSQL IDRepo + Keycloak IAM)
+# MOSIP Substrate Services Overlay (IDRepo REST Service + PostgreSQL + Keycloak IAM)
 # Enable by setting in your .env file:
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.mosip.yml
 
@@ -17,6 +17,31 @@ services:
       - ./db/init-idrepo.sql:/docker-entrypoint-initdb.d/init-idrepo.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  idrepo:
+    image: ${PROJECT_NAME}:dev
+    container_name: ${PROJECT_NAME}-idrepo
+    command: ["uv", "run", "register-id", "idrepo", "serve", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PORT: 8080
+    ports:
+      - "${MOSIP_IDREPO_PORT}:8080"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")'"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -42,18 +67,16 @@ services:
 
   app:
     environment:
-      POSTGRES_HOST: "postgres"
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      MOSIP_IDREPO_BASE_URL: "http://idrepo:8080"
       KEYCLOAK_URL: "http://keycloak:8080"
       KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM}
     depends_on:
-      postgres:
-        condition: service_healthy
+      idrepo:
+        condition: service_started
+      keycloak:
+        condition: service_started
 
 volumes:
   postgres_data:
