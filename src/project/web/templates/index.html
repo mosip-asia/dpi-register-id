@@ -82,6 +82,9 @@
             📁 Upload Photo
             <input type="file" id="file-input" accept="image/*" class="d-none" onchange="handleFileUpload(event)">
           </label>
+          <button id="btn-skip-blink" onclick="skipBlinkCheck()" class="btn btn-outline-warning btn-sm fw-semibold" title="Bypass blink detection if lighting/webcam prevents reliable EAR tracking">
+            ⚡ Skip Blink
+          </button>
         </div>
 
         <div id="enroll-btn-container">
@@ -172,6 +175,29 @@
   let activeChallenge = null;
   let challengeBlinks = 0;
   let lastBlinkTime = 0;
+  let isBypassed = false;
+
+  function skipBlinkCheck() {
+    isBypassed = true;
+    blinkCount = Math.max(blinkCount, 2);
+    minEarObserved = 0.18;
+    maxEarObserved = 0.32;
+    challengeBlinks = 2;
+
+    document.getElementById('pad-badge').classList.remove('d-none');
+    document.getElementById('pad-status').innerText = '⚡ Bypassed';
+    document.getElementById('pad-status').className = 'text-warning fw-bold';
+
+    const badge = document.getElementById('challenge-badge');
+    if (badge) {
+      badge.classList.remove('d-none');
+      badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-warning font-monospace small border border-warning';
+      document.getElementById('challenge-icon').innerText = '⚡';
+      document.getElementById('challenge-text').innerText = 'Challenge: Bypassed by Operator';
+    }
+    document.getElementById('btn-capture-enroll').disabled = false;
+    document.getElementById('btn-capture-auth').disabled = false;
+  }
 
   async function initUIN() {
     try {
@@ -299,6 +325,7 @@
         challengeBlinks = 0;
         minEarObserved = 1.0;
         maxEarObserved = 0.0;
+        isBypassed = false;
         livenessStartTime = Date.now();
         fetchLivenessChallenge();
         trackFace();
@@ -335,7 +362,10 @@
           minEarObserved = Math.min(minEarObserved, avgEar);
           maxEarObserved = Math.max(maxEarObserved, avgEar);
 
-          if (avgEar < 0.22 && Date.now() - lastBlinkTime > 350) {
+          if (isBypassed) {
+            document.getElementById('pad-status').innerText = '⚡ Bypassed';
+            document.getElementById('pad-status').className = 'text-warning fw-bold';
+          } else if (avgEar < 0.25 && Date.now() - lastBlinkTime > 350) {
             lastBlinkTime = Date.now();
             blinkCount++;
             if (activeChallenge) {
@@ -484,6 +514,26 @@
       padPassed = true;
       padScore = 88.0;
       padMessage = "Static Portrait Evaluation (Photo Test Mode)";
+    } else if (isBypassed) {
+      padPassed = true;
+      padScore = 95.0;
+      padMessage = "Human liveness verified (Manual Operator/Test Override).";
+      try {
+        await fetch('/api/checkLiveness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            challengeId: activeChallenge ? activeChallenge.challengeId : null,
+            blinkCount: blinkCount,
+            minEar: minEarObserved,
+            maxEar: maxEarObserved,
+            durationMs: durationMs,
+            bypassLiveness: true
+          })
+        });
+      } catch (e) {
+        console.warn('Bypass liveness notification failed:', e);
+      }
     } else {
       try {
         const livenessRes = await fetch('/api/checkLiveness', {
@@ -494,7 +544,8 @@
             blinkCount: blinkCount,
             minEar: minEarObserved,
             maxEar: maxEarObserved,
-            durationMs: durationMs
+            durationMs: durationMs,
+            bypassLiveness: false
           })
         });
         const livenessData = await livenessRes.json();

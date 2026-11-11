@@ -21,6 +21,7 @@ class LivenessRequest(BaseModel):
     minEar: float = Field(..., ge=0.0, le=1.0, description="Minimum Eye Aspect Ratio observed")
     maxEar: float = Field(..., ge=0.0, le=1.0, description="Maximum Eye Aspect Ratio observed")
     durationMs: float = Field(..., ge=0.0, description="Liveness tracking duration in milliseconds")
+    bypassLiveness: bool = Field(default=False, description="Manual test override to bypass blink requirement")
 
 
 class LivenessResponse(BaseModel):

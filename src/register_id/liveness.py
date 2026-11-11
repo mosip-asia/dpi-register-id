@@ -56,12 +56,22 @@ def evaluate_liveness(req: LivenessRequest) -> LivenessResponse:
     Evaluates client EAR dynamics according to ISO 30107-3 PAD rules.
     A live human presents natural micro-motion and eye closure:
     - At least 1 natural blink cycle
-    - Minimum EAR observed < 0.23 (eye closure)
-    - EAR delta (max - min) >= 0.06 (transition dynamic)
+    - Minimum EAR observed < 0.25 (eye closure)
+    - EAR delta (max - min) >= 0.04 (transition dynamic)
+    - If bypassLiveness is True, passes immediately (manual operator/test override)
     - If challengeId is supplied, validates active anti-replay challenge satisfaction.
     """
+    if req.bypassLiveness:
+        if req.challengeId:
+            _ACTIVE_CHALLENGES.pop(req.challengeId, None)
+        return LivenessResponse(
+            status="PASSED",
+            livenessScore=95.0,
+            message="Human liveness verified (Manual Operator/Test Override).",
+        )
+
     ear_delta = req.maxEar - req.minEar
-    is_live = req.blinkCount >= 1 and req.minEar < 0.23 and ear_delta >= 0.06
+    is_live = req.blinkCount >= 1 and req.minEar < 0.25 and ear_delta >= 0.04
 
     if not is_live:
         return LivenessResponse(

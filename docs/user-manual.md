@@ -120,7 +120,8 @@ You will see the **Citizen Identity Enrollment** panel:
 │                                      │  Keycloak Initial Password              │
 │                                      │  [ ••••••••••••••                     ] │
 │                                      │                                         │
-│   [📷 Open Webcam] [📁 Upload Photo] │  [ ✨ Enroll Face into IDRepo         ] │
+│   [📷 Open Webcam] [📁 Upload]       │  [ ✨ Enroll Face into IDRepo         ] │
+│   [⚡ Skip Blink]                     │                                         │
 └──────────────────────────────────────┴─────────────────────────────────────────┘
 ```
 
@@ -134,6 +135,7 @@ You will see the **Citizen Identity Enrollment** panel:
    - The top-right badge displays the live **Eye Aspect Ratio (EAR)**:
      $$\text{EAR} = \frac{\|p_2 - p_6\| + \|p_3 - p_5\|}{2 \|p_1 - p_4\|}$$
 4. **Blink your eyes naturally:** Notice the badge instantly flash **"👁️ Blink Detected!"** and switch to **"✅ Live Motion OK"**.
+5. **⚡ Skip Blink (Manual Test Override):** If your webcam has a low frame rate, heavy backlighting, or glasses that interfere with facial landmark EAR tracking, click **"⚡ Skip Blink"** to immediately satisfy the PAD challenge and unlock enrollment/verification.
 
 ### Step 4.3: Submit Enrollment
 1. Notice the **Generated MOSIP UIN** is pre-allocated from the IDRepo service.
@@ -166,7 +168,7 @@ The browser outputs a success card:
 2. Point your camera at a **static printed photo** or a **photo displayed on a smartphone screen**, OR hold your eyes wide open without blinking.
 3. Click **"🛡️ Verify 1:1 Match & PAD"**.
 4. **Expected Outcome: ❌ REJECTED (Spoof Detected)**
-   - The system detects insufficient eye closure dynamics ($\Delta \text{EAR} < 0.06$).
+   - The system detects insufficient eye closure dynamics ($\Delta \text{EAR} < 0.04$ or $\text{EAR}_{\min} \ge 0.25$).
    - Returns: `Presentation Attack / Spoof Detected (Static photo or insufficient motion)`.
    - **Zero session tokens are issued.**
 

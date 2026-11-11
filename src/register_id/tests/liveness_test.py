@@ -65,3 +65,19 @@ def test_liveness_challenge_insufficient_blinks():
     res = evaluate_liveness(req)
     assert res.status == "FAILED"
     assert "Challenge incomplete" in res.message
+
+
+def test_evaluate_liveness_bypass():
+    challenge = create_liveness_challenge()
+    req = LivenessRequest(
+        challengeId=challenge.challengeId,
+        blinkCount=0,
+        minEar=0.30,
+        maxEar=0.30,
+        durationMs=1000.0,
+        bypassLiveness=True,
+    )
+    res = evaluate_liveness(req)
+    assert res.status == "PASSED"
+    assert res.livenessScore == 95.0
+    assert "Manual Operator/Test Override" in res.message
