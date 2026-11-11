@@ -1,0 +1,25 @@
+name: "SSH Execute"
+description: "Executes commands or scripts on a remote host via SSH"
+inputs:
+  server-host:
+    description: "Target server hostname or IP"
+    required: true
+  server-user:
+    description: "SSH user"
+    required: true
+  cmd:
+    description: "Command or shell script to execute on the remote host"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run command via SSH
+      shell: bash
+      env:
+        SSH_CMD: ${{ inputs.cmd }}
+      run: |
+        ssh -T -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+          "${{ inputs.server-user }}@${{ inputs.server-host }}" \
+          "bash -se" <<< "$SSH_CMD"
+
