@@ -1,4 +1,5 @@
 import base64
+import json
 
 from fastapi.testclient import TestClient
 from project.web import app
@@ -37,7 +38,6 @@ def test_api_enroll_and_authenticate_flow():
         "fullName": "Test Citizen",
         "email": "test@citizen.asia",
         "faceImage": face_image,
-        "password": "SecretPassword123!",
     }
 
     enroll_res = client.post("/api/enroll", json=enroll_payload)
@@ -46,7 +46,7 @@ def test_api_enroll_and_authenticate_flow():
     assert enroll_data["status"] == "SUCCESS"
     assert enroll_data["uin"] == uin
     assert enroll_data["cbeffGenerated"] is True
-    assert enroll_data["keycloakProvisioned"] is False
+    assert "keycloakProvisioned" not in enroll_data
 
     idrepo = IDRepoClient(enable_inprocess_fallback=True)
     stored = idrepo.get_identity(uin)
@@ -91,3 +91,53 @@ def test_api_enroll_and_authenticate_flow():
     impostor_data = impostor_res.json()
     assert impostor_data["verified"] is False
     assert impostor_data["isFaceMatch"] is False
+
+
+def test_enroll_rejects_password_and_client_embedding():
+    face_image = _data_url(b"reject-extra-fields")
+    base = {
+        "uin": "9876-5432-1498",
+        "fullName": "No Extras",
+        "email": "extras@citizen.asia",
+        "faceImage": face_image,
+    }
+    with_password = client.post("/api/enroll", json={**base, "password": "SecretPassword123!"})
+    assert with_password.status_code == 422
+    with_embedding = client.post("/api/enroll", json={**base, "faceEmbedding": [0.1] * 128})
+    assert with_embedding.status_code == 422
+
+
+def test_api_credentials_issue_after_enroll():
+    face_image = _data_url(b"credentials-after-enroll")
+    uin = "9876-5432-1497"
+    password = "CitizenChosenPass9"
+    enroll = client.post(
+        "/api/enroll",
+        json={
+            "uin": uin,
+            "fullName": "Credential Citizen",
+            "email": "cred@citizen.asia",
+            "faceImage": face_image,
+        },
+    )
+    assert enroll.status_code == 200
+
+    short = client.post("/api/credentials", json={"uin": uin, "password": "short"})
+    assert short.status_code == 422
+
+    missing = client.post(
+        "/api/credentials",
+        json={"uin": "9876-5432-1499", "password": password},
+    )
+    assert missing.status_code == 404
+
+    issued = client.post("/api/credentials", json={"uin": uin, "password": password})
+    assert issued.status_code == 200
+    body = issued.json()
+    assert body["status"] == "SUCCESS"
+    assert body["uin"] == uin
+    assert body["keycloakProvisioned"] is False
+
+    idrepo = IDRepoClient(enable_inprocess_fallback=True)
+    stored = idrepo.get_identity(uin)
+    assert password not in json.dumps(stored)

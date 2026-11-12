@@ -63,10 +63,12 @@ class KeycloakBridgeClient:
         uin: str,
         full_name: str,
         email: str,
-        password: str = "CitizenPass123!",
+        password: str,
     ) -> bool:
         """
         Creates or updates a citizen user in the target Keycloak realm.
+
+        password is the credential the citizen chose. There is no default.
         """
         import requests
         admin_token = self.get_admin_token()

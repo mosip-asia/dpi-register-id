@@ -3,7 +3,8 @@ Pydantic data models for the register_id submodule.
 """
 
 from typing import Any
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LivenessChallenge(BaseModel):
@@ -33,11 +34,12 @@ class LivenessResponse(BaseModel):
 
 
 class EnrollRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     uin: str = Field(..., min_length=4, max_length=32, description="MOSIP Unique Identification Number")
     fullName: str = Field(..., min_length=1, max_length=128, description="Citizen full legal name")
     email: str = Field(..., max_length=128, description="Citizen email address")
     faceImage: str = Field(..., description="Base64-encoded face image (JPEG/PNG data URL)")
-    password: str = Field(default="CitizenPass123!", description="Initial password for Keycloak IAM")
 
 
 class AuthRequest(BaseModel):
@@ -45,6 +47,19 @@ class AuthRequest(BaseModel):
     liveEmbedding: list[float] = Field(..., description="Live probe 128-D descriptor vector")
     livenessScore: float = Field(..., ge=0.0, le=100.0, description="PAD confidence score")
     livenessPassed: bool = Field(..., description="Whether ISO 30107-3 PAD passed")
+
+
+class CredentialRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uin: str = Field(..., min_length=4, description="Enrolled citizen UIN")
+    password: str = Field(..., min_length=8, description="Password chosen by the citizen")
+
+
+class CredentialResponse(BaseModel):
+    status: str
+    uin: str
+    keycloakProvisioned: bool
 
 
 class AuthResponse(BaseModel):

@@ -18,6 +18,8 @@ from register_id.models import (
     AuthRequest,
     AuthResponse,
     CitizenSummary,
+    CredentialRequest,
+    CredentialResponse,
     EnrollRequest,
     LivenessChallenge,
     LivenessRequest,
@@ -104,10 +106,10 @@ def check_liveness_endpoint(req: LivenessRequest):
 @router.post("/enroll")
 def enroll_citizen_endpoint(req: EnrollRequest):
     """
-    Enrolls a citizen face through the MOSIP IDRepo REST interface and provisions Keycloak IAM.
+    Enrolls a citizen face through the MOSIP IDRepo REST interface.
 
     The frontal template is computed from the image bytes. A client-supplied
-    embedding is not accepted. The password is still provisioned here.
+    embedding is not accepted. Keycloak login is a separate POST /api/credentials call.
     """
     idrepo = get_idrepo_client()
 
@@ -135,14 +137,6 @@ def enroll_citizen_endpoint(req: EnrollRequest):
             detail=f"MOSIP IDRepo enrollment failed: {error_msg}",
         )
 
-    keycloak = get_keycloak_client()
-    keycloak_ok = keycloak.provision_citizen(
-        uin=req.uin,
-        full_name=req.fullName,
-        email=req.email,
-        password=req.password,
-    )
-
     return {
         "status": "SUCCESS",
         "message": "Citizen face enrolled successfully via MOSIP IDRepo interface",
@@ -150,8 +144,33 @@ def enroll_citizen_endpoint(req: EnrollRequest):
         "fullName": req.fullName,
         "backend": "mosip-idrepo-rest",
         "cbeffGenerated": cbeff_xml is not None,
-        "keycloakProvisioned": keycloak_ok,
     }
+
+
+@router.post("/credentials", response_model=CredentialResponse)
+def issue_credentials_endpoint(req: CredentialRequest):
+    """
+    Issues the Keycloak login for an already enrolled citizen.
+
+    The password is sent only to Keycloak. It is never written to IDRepo.
+    """
+    idrepo = get_idrepo_client()
+    citizen = idrepo.get_identity(req.uin)
+    if not citizen:
+        raise HTTPException(status_code=404, detail=f"Citizen UIN '{req.uin}' not found in IDRepo.")
+
+    keycloak = get_keycloak_client()
+    keycloak_ok = keycloak.provision_citizen(
+        uin=req.uin,
+        full_name=citizen.get("full_name") or "",
+        email=citizen.get("email") or "",
+        password=req.password,
+    )
+    return CredentialResponse(
+        status="SUCCESS",
+        uin=req.uin,
+        keycloakProvisioned=keycloak_ok,
+    )
 
 
 @router.post("/authenticate", response_model=AuthResponse)
