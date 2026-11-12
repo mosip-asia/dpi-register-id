@@ -51,3 +51,28 @@ def match_embeddings(
     # Normalize score: distance 0.0 -> 100%, distance >= 1.0 -> 0%
     confidence = max(0.0, min(100.0, (1.0 - (distance / 1.0)) * 100.0))
     return is_match, round(distance, 4), round(confidence, 1)
+
+
+def match_gallery(
+    gallery: list[list[float]],
+    probe: list[float],
+    threshold: float = 0.50,
+) -> tuple[bool, float, float]:
+    """
+    Compares a probe against every gallery vector.
+
+    Distance is the minimum Euclidean distance from the probe to any vector.
+    Match and confidence use the same formula as match_embeddings.
+    """
+    if not gallery:
+        raise ValueError("Gallery must contain at least one embedding")
+
+    best = None
+    for stored in gallery:
+        distance = compute_euclidean_distance(stored, probe)
+        if best is None or distance < best:
+            best = distance
+
+    is_match = best < threshold
+    confidence = max(0.0, min(100.0, (1.0 - (best / 1.0)) * 100.0))
+    return is_match, round(best, 4), round(confidence, 1)
