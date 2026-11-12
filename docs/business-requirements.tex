@@ -1,0 +1,476 @@
+% Business requirements for register-id.
+% Compile from this directory:
+%   lualatex business-requirements.tex
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=2.15cm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Helvetica Neue}
+\setsansfont{Helvetica Neue}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+\usepackage{setspace}
+
+\definecolor{ink}{HTML}{2E2F30}
+\definecolor{muted}{HTML}{5E6061}
+\definecolor{green}{HTML}{3F6433}
+\definecolor{rule}{HTML}{D9D6CE}
+\definecolor{panel}{HTML}{F3F7F0}
+\definecolor{partial}{HTML}{8A7340}
+\definecolor{missing}{HTML}{8C3B32}
+\definecolor{met}{HTML}{3F6433}
+
+\setlist[itemize]{leftmargin=1.15em,itemsep=0.22em,topsep=0.35em,parsep=0pt}
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{0pt}
+\setstretch{1.05}
+
+\pagestyle{plain}
+\hypersetup{
+  pdftitle={register-id Business Requirements},
+  pdfauthor={Asian Institute of Technology},
+  colorlinks=true,
+  linkcolor=green,
+  urlcolor=green
+}
+
+\titleformat{\section}
+  {\Large\bfseries\sffamily\color{green}}
+  {\thesection}{0.7em}{}
+  [\vspace{0.15em}{\color{rule}\titlerule}]
+\titleformat{\subsection}
+  {\large\bfseries\sffamily\color{ink}}
+  {\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.35em}{0.55em}
+\titlespacing*{\subsection}{0pt}{0.95em}{0.3em}
+
+\ExplSyntaxOn
+\NewDocumentCommand{\status}{m}{
+  \str_case:nnF {#1} {
+    {Met} {\textcolor{met}{\textbf{Met}}}
+    {Partial} {\textcolor{partial}{\textbf{Partial}}}
+    {Missing} {\textcolor{missing}{\textbf{Missing}}}
+  } {\textbf{#1}}
+}
+\ExplSyntaxOff
+
+\newcommand{\reqhead}[3]{%
+  \phantomsection
+  \subsection*{\texorpdfstring{#1\quad #2\hfill{\normalsize\status{#3}}}{#1 #2}}%
+  \addcontentsline{toc}{subsection}{#1\ #2}%
+}
+
+\newcommand{\why}[1]{\textbf{Why.}\ #1\par}
+\newcommand{\accept}[1]{\textbf{Acceptance.}\par\begin{itemize}#1\end{itemize}}
+
+\begin{document}
+\color{ink}
+
+{\sffamily\bfseries\LARGE\color{green} register-id}\\[0.25em]
+{\sffamily\Large Citizen Registration Gateway}\\[0.15em]
+{\sffamily\large Business requirements}\\[0.7em]
+{\color{rule}\rule{\textwidth}{1.1pt}}\\[0.55em]
+{\small\color{muted}
+Asian Institute of Technology \textperiodcentered\
+MOSIP Asia Digital Public Infrastructure \textperiodcentered\
+12 November 2026\par
+}
+\vspace{0.4em}
+
+\noindent
+These requirements describe what the gateway must do for a person enrolling in a browser. They cover accessibility, security, modularity, and standardization. Each item records whether the prototype on 12 November 2026 already meets it.
+
+\vspace{0.35em}
+\noindent
+Four reviews were drafted in parallel, one per theme, against the running enroll, sweep, credential, and IDRepo paths. Where those reviews disagreed, the rule below is the one that keeps a UIN from meaning more than the gateway actually checked.
+
+\tableofcontents
+\vspace{0.6em}
+{\color{rule}\rule{\textwidth}{0.4pt}}
+
+\section{The current software path}
+
+The picture of the running path is \href{diagrams/current-system.pdf}{\texttt{docs/diagrams/current-system.pdf}}, compiled from \texttt{docs/diagrams/current-system.tex}. It is one sheet with two bands, Enroll and 1:1 authenticate, read from left to right. The three columns are the browser (\texttt{src/project/web/templates/index.html} and face-api.js 1.7.12), the FastAPI server (\texttt{src/register\_id/api.py}), and PostgreSQL, which the gateway reaches only through the IDRepo REST service. A solid arrow is a request. A dashed arrow is a response. A rose box is a neural net loaded or run in the page. An amber box is the server vector, a hash of the JPEG bytes and not a face model. Clicking a box in that PDF opens the function behind it.
+
+\subsection{Enrollment}
+
+The person opens the portal and the page loads its weights from the jsDelivr CDN. On each camera frame, SSD MobileNet v1 finds a face box and the 68-landmark net finds the eyes, the nose, and the jaw. The face-recognition net is loaded into the page and left idle. The browser never computes a 128-dimensional descriptor, and it never sends landmarks or a vector.
+
+From those landmarks the page does ordinary arithmetic. It tracks the eye-aspect ratio and a blink count, estimates yaw, and bins that yaw into five sectors from the person's left shoulder to the right: far-left, left, front, right, and far-right. Each accepted frame is kept as a JPEG data URL at quality 0.8. A live enrollment waits until all five sectors have a frame. A still photo is a single frontal JPEG and does not carry the five views.
+
+When the person submits, the page calls \texttt{POST /api/enroll} with the UIN, the legal name, the email, the frontal \texttt{faceImage}, and, for a live camera, \texttt{faceViews}: five pairs of sector, client yaw, and JPEG. The server refuses a vector supplied by the caller. It builds an ISO/IEC 19794-5 face record inside an ISO/IEC 19785-3 CBEFF document from the JPEG bytes, then runs \texttt{embed\_face\_image}. That function hashes those bytes with SHA-256 and maps the hash onto a 128-dimensional unit vector. The same JPEG always yields the same vector. A different JPEG lands far away. This is a duplicate-image check. It does not recognize a face. A live enrollment stores one vector per sector. A photo stores the single vector under the sector \texttt{front}.
+
+The gateway then writes through the IDRepo REST interface. The mock service, not FastAPI, opens SQL. The person, the JPEG text, and the CBEFF XML go to \texttt{mosip\_idrepo.citizen\_identity}. The vectors go to \texttt{mosip\_ida.face\_template}, one row per sector, keyed by UIN. The image stays in the identity row. It is not packed inside the vector. The response that comes back to the page is the status, the UIN, the name, and whether CBEFF was generated. The vector and the JPEG stay on the server.
+
+Login is a second step the diagram does not draw. After the identity is saved, the page can call \texttt{POST /api/credentials} with a password the person chooses. That password goes only to Keycloak. It is not written on the identity row.
+
+\subsection{1:1 authentication}
+
+The lower band of the diagram uses the same browser models, already in memory. Detection and landmarks run again on the live frames or on an uploaded photo. Blink totals and the minimum and maximum eye-aspect ratio stay in the page. The diagram then shows two server calls.
+
+The first is \texttt{POST /api/checkLiveness}, and only for a live camera. The page sends a challenge id, a blink count, the EAR range, and a duration. It sends no image and no embedding. \texttt{evaluate\_liveness} applies thresholds to those numbers: at least one blink, a minimum EAR under 0.25, an EAR change of at least 0.045, and a challenge nonce that is still live. There is no model and no look at the pixels. A still photo, on the diagram, skips this call and sets \texttt{livenessPassed} locally. The page keeps the score.
+
+The second call is \texttt{POST /api/authenticate}. The diagram sends the UIN, the liveness score and flag, a frontal \texttt{liveImage}, and, for a live camera, the five \texttt{liveViews}. The server reads the stored 128-dimensional rows for that UIN, hashes each probe JPEG with the same function, and compares them in \texttt{matcher.py} by Euclidean distance. On that drawing, a pass is a distance under 0.50 together with a liveness pass. The read is the identity row for the name and email, and the template rows for the stored vectors. Nothing is written. The probe JPEG is not saved. The page is shown a match flag, a distance, a score, and the citizen's name. No vector comes back.
+
+The verify step in the gateway has since moved off that match box. The camera asks for a head-sweep challenge (\texttt{POST /api/sweep/challenge}) that lasts 90 seconds and can be used once. Blink detection and \texttt{checkLiveness} stay on the page as diagnostics. Skip Blink records an override and does not replace the sweep. A still photo is refused at verification. \texttt{POST /api/authenticate} now carries the challenge id and the five views. The server accepts the submission when the challenge is valid, the client yaw labels step from left to right, and the five images are different bytes. It does not estimate yaw from the pixels, and it does not run the distance comparison. \texttt{isFaceMatch} and \texttt{livenessPassed} stay false. \texttt{verified} means the sweep submission was accepted. The diagram's amber match box remains the picture of the hash embedder that enrollment still uses. It is not the decision the authenticate endpoint returns today.
+
+\section{Rules that settle the disagreements}
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=0.55em]
+  \item A pass has three separate answers: the submission was accepted, liveness passed, and the face matched. Each answer comes from the module configured for that check. With the current head sweep and byte-hash embedder, only the submission answer can be true. The screen, the API, and Keycloak use those words. ``Verified,'' ``biometrics valid,'' and a 0.68 match score appear only after the module that owns that check has actually passed.
+
+  \item A photo upload can save a draft so a missing camera is not a dead end. It becomes the biometric of record only after the same presentation check the gateway is willing to claim. A person who cannot complete a head turn can finish with an operator-assisted capture. That capture is attributed to the operator and is labeled as assisted.
+
+  \item The challenge expires and is single-use, and it can be renewed without clearing the name, the email, or poses already accepted. The form survives a slow network. The timer does not wipe the application.
+
+  \item Keycloak is the only place a password is stored. If Keycloak is down, credential issue fails and the IDRepo record stays so the login can be retried. The gateway tells Keycloak that biometrics are valid only after both the presentation check and a real matcher have passed.
+
+  \item The mock IDRepo is a deployment choice. If the configured IDRepo cannot be reached, enrollment fails. The gateway does not complete it inside its own process.
+\end{enumerate}
+
+\section{Accessibility}
+
+\reqhead{BR-A-01}{Phone and desktop}{Partial}
+A person can enroll on a current phone browser and a current desktop browser, with the front camera on a phone and the steps still readable when the keyboard is open.
+\why{Citizens and students will use their own phones, shared lab computers, and campus networks. The page has to work in the hand and on a desk.}
+\accept{
+  \item Chrome, Edge, Firefox, and Safari start the flow on both a phone and a desktop.
+  \item On a phone the steps stack in one column, buttons are large enough to tap, and the camera uses the front camera.
+  \item The viewfinder stays available while the person fills in name and email, including when the software keyboard is open.
+  \item A normal desktop window shows the same steps without horizontal scrolling.
+}
+
+\reqhead{BR-A-02}{Camera failure}{Partial}
+A blocked, missing, or slow camera still offers a photo upload on the same screen, in everyday language, without losing the name and email already typed.
+\why{Permission prompts fail, shared computers have no camera, and a denied camera cannot end the application.}
+\accept{
+  \item Denying the camera, or having no camera, shows a short explanation and a visible photo upload.
+  \item The message names the next action in everyday words.
+  \item Upload works when the live face models have not finished downloading.
+  \item After a failed camera start, the name, email, and any photo already chosen are still there.
+}
+
+\reqhead{BR-A-03}{Plain language in Thai and English}{Missing}
+Each step has one plain-language instruction in Thai or English, and the choice stays through enrollment and login.
+\why{This surface is for AIT in Thailand. People recover from the sentence on the screen. Thai and English are the language pair for citizens, students, and the operators helping them.}
+\accept{
+  \item The person can switch language before capture, and the choice stays through enrollment and login creation.
+  \item Thai and English cover buttons, pose directions, camera failure, upload, success, and password rules.
+  \item Errors name the next action. Standards codes and diagnostic readouts stay closed unless someone asks for them.
+  \item A Thai name can be typed and shown back correctly. Success separates ``your registration number is saved'' from ``your login is created.''
+}
+
+\reqhead{BR-A-04}{Keyboard, screen reader, and contrast}{Partial}
+Name, UIN, errors, and pose progress work from the keyboard and from a screen reader, and remain readable without relying on color.
+\why{Operators and citizens with low vision still have to enter a name, read the UIN, and know whether a pose was accepted. The UIN is the value the person must keep.}
+\accept{
+  \item Every field has a visible label, and the person can reach every button in order without a mouse.
+  \item Pose progress is announced in words, and errors appear in the page.
+  \item Instructions and the UIN meet ordinary contrast for body text, including on the camera panel.
+  \item Pose success is a word or icon together with color, and the browser can enlarge the page without controls overlapping.
+}
+
+\reqhead{BR-A-05}{Motion and direction}{Partial}
+Blink cues and the head-turn guide respect reduced motion, and ``left'' means the person's left on a mirrored preview.
+\why{Blink numbers, a moving outline, and a forced sweep are motion prompts. A mirrored preview makes ``left'' and ``right'' ambiguous for the person and for an operator standing opposite.}
+\accept{
+  \item If the device asks for reduced motion, the page does not flash the eye readout or animate the guide.
+  \item The person can turn the blink prompt off and still see what the real step is.
+  \item Pose guidance can be a still picture or a short sentence.
+  \item The instruction and a simple diagram use the person's left and right, so an operator can repeat the same direction.
+}
+
+\reqhead{BR-A-06}{An alternative to the five-pose sweep}{Missing}
+A person who cannot complete five head poses is offered an assisted finish before the sweep is required.
+\why{Neck range, a wheelchair headrest, pain, or a phone held by someone else can make the sweep impossible. Upload may save a draft. It does not by itself complete a biometric check.}
+\accept{
+  \item Before the sweep, the page offers another way to finish for someone who cannot turn their head.
+  \item That alternative is described in the same plain language as the sweep.
+  \item A still photo accepted as a draft is not later treated as a completed biometric check.
+  \item The person is told, in words, when a pose has been accepted.
+}
+
+\reqhead{BR-A-07}{Assisted enrollment}{Missing}
+An operator can assist without the operator's face or name becoming the applicant.
+\why{Shared computers and assisted students are part of the audience. The person typing may not be the person in front of the camera.}
+\accept{
+  \item The helper can mark that they are assisting, and the captured face is confirmed as the applicant before submit.
+  \item The applicant's name is required. The form does not invent a name.
+  \item The helper can read each step aloud without the helper's own face being stored as the applicant.
+  \item On a shared computer, the applicant enters the password themselves.
+}
+
+\reqhead{BR-A-08}{Time, pause, and a clear screen}{Missing}
+The person can pause, retry a pose, and renew a challenge without losing the application, and can clear the screen when finished on a shared computer.
+\why{Slow movement, a translator, and a weak connection are normal here. The same browser will be handed to the next student.}
+\accept{
+  \item A pose, the form, and the login step survive long enough for a slow user. Renewing a challenge keeps the name, email, and poses already accepted.
+  \item A pose that is not accepted explains what is wrong and lets the person try again without clearing the form.
+  \item A slow network shows waiting and keeps what was already entered.
+  \item ``Done, clear this screen'' removes the name, UIN, photo, and password. The password can be shown while it is chosen, then hidden. The UIN is shown in large type long enough to write down.
+}
+
+\section{Security}
+
+\reqhead{BR-S-01}{What a pass is allowed to mean}{Partial}
+Until a face matcher is configured, a pass means only that a fresh sweep submission was accepted.
+\why{Calling that result identity verification lets a second person take a UIN. The byte hash detects identical images. A new capture of the same person is a different result.}
+\accept{
+  \item A sweep pass sets a submission flag and leaves identity-match and liveness flags negative.
+  \item No screen, receipt, or Keycloak attribute reads as ``face matched'' or ``biometrics valid'' from that pass.
+  \item Operator copy describes the hash check as identical-image detection, and a citizen recapture is not promised to match an enrolled image.
+  \item Relying parties cannot treat the result as 1:1 ownership of the UIN.
+}
+
+\reqhead{BR-S-02}{Single-use challenges}{Partial}
+Each sweep challenge is single-use, expires, and is consumed on success, expiry, or failure across every instance that can accept a submission.
+\why{A reusable challenge lets an old or copied capture stand in for the person at the camera. A store that lives in one process fails once more than one instance is running.}
+\accept{
+  \item A second submit of the same challenge is rejected.
+  \item An attempt after the window is rejected, and that challenge cannot be reused.
+  \item Challenge state survives restart and is shared by every app instance that can accept a submission.
+}
+
+\reqhead{BR-S-03}{A new session needs a fresh capture}{Partial}
+A stored photo, a screen replay, or an earlier sweep file cannot satisfy a new session.
+\why{Replay is a direct path to a recording, or a second person, standing in for the applicant.}
+\accept{
+  \item Images submitted for a challenge are bound to that challenge's issuance.
+  \item A repeated identical byte sequence across poses is rejected.
+  \item Once the product claims that the head turned, that claim is based on a measurement of the capture.
+  \item Client pose labels alone do not establish a live turn.
+}
+
+\reqhead{BR-S-04}{The password stays in Keycloak}{Partial}
+The password is collected only at credential issue and is stored only in Keycloak.
+\why{A breach of the biometric store must not also reveal the login secret. A password reset must not require reading the face record.}
+\accept{
+  \item Enrollment rejects any password field.
+  \item An IDRepo read of the UIN after credential issue shows no password.
+  \item A failed identity-provider write does not leave the password in the identity store.
+  \item The citizen is told that the login was created only when Keycloak has the user.
+}
+
+\reqhead{BR-S-05}{Who may see a face}{Missing}
+A raw face image or its CBEFF package is readable only by a role whose job requires it, for a stated purpose and retention period.
+\why{The identity record is a national biometric. Broad read access turns every operator and every debug tool into a copy of a citizen's face.}
+\accept{
+  \item Retrieval of the raw image or CBEFF is denied without an authorized role.
+  \item Logs, command-line output, and support tools do not print image bytes.
+  \item Retention of the raw image has an explicit purpose and an expiry or deletion path once a real template exists.
+}
+
+\reqhead{BR-S-06}{Consent before capture}{Missing}
+The camera opens only after the person has agreed to capture, the purpose, and who can see the image.
+\why{A national onboarding gateway that captures a face needs a record of agreement before it holds the image or shares it with an identity provider.}
+\accept{
+  \item Enrollment is rejected when no consent record is present.
+  \item The record names the purpose, the time, and the language version the person saw.
+  \item Refusal leaves no face image stored.
+}
+
+\reqhead{BR-S-07}{An override is an exception}{Partial}
+A blink override is an attributed exception. It cannot enroll a face, pass a sweep, or issue a login by itself.
+\why{Operator substitution is a way for a clerk to complete onboarding for someone who is not present.}
+\accept{
+  \item A blink override is stored with operator identity, time, and reason, and it is labeled a diagnostic override.
+  \item Authenticate still requires the sweep submission check.
+  \item Enrollment and credential issue do not succeed on the override alone.
+}
+
+\reqhead{BR-S-08}{Audit of enroll and credential issue}{Missing}
+Every enrollment and credential issue writes an audit entry that survives restart and omits the face bytes and the password.
+\why{A disputed UIN or a fraudulent login cannot be investigated if the only trace disappears on restart.}
+\accept{
+  \item Successful and failed enroll and credential-issue events are queryable after process restart.
+  \item The entry includes actor, UIN, timestamp, and result, and excludes image bytes and the password.
+  \item An auditor can see whether biometrics were claimed valid at issue time.
+}
+
+\reqhead{BR-S-09}{The same bar for storing a face}{Missing}
+A face is stored as the biometric of record only after the presentation check the product claims, and a packaging failure does not keep a raw image as a silent fallback.
+\why{A photo enrolled now becomes the reference a future matcher will trust. A weak enroll permanently arms a false accept.}
+\accept{
+  \item Enrollment without an accepted presentation check does not write a biometric of record.
+  \item The stored image is the one from that check.
+  \item If image packaging fails, the raw image is kept only under an explicit, audited exception.
+}
+
+\section{Modularity}
+
+\reqhead{BR-M-01}{IDRepo writes the citizen}{Partial}
+Only IDRepo creates or updates the citizen record. The gateway submits demographics, the CBEFF document, and server-built templates.
+\why{Later products will read the same person. A private copy inside the gateway will disagree with MOSIP about who exists.}
+\accept{
+  \item After enrollment, the UIN, name, email, and biometrics are readable from the IDRepo interface the environment points at.
+  \item The enrollment screen keeps one destination when the team moves from the mock to real MOSIP.
+  \item A credential request that fails leaves the IDRepo record in place.
+}
+
+\reqhead{BR-M-02}{Keycloak writes the login}{Partial}
+Only Keycloak stores the login. A credential call for an unknown UIN creates no user.
+\why{eSignet and Inji depend on the realm account. AIT can change Keycloak without reopening the biometric record.}
+\accept{
+  \item Enrollment completes with no password and no Keycloak user.
+  \item The credential call sends the chosen password only to Keycloak, after it has confirmed the UIN exists.
+  \item Repeating the credential call for that UIN does not create a second identity.
+  \item The caller can tell a filed citizen from a citizen whose login exists.
+}
+
+\reqhead{BR-M-03}{Mock or real MOSIP by configuration}{Partial}
+Mock versus real MOSIP is selected by configuration, and an unreachable IDRepo fails the operation.
+\why{Demos run on the mock now. The same enrollment must later point at real MOSIP. A silent substitute files citizens in the wrong place.}
+\accept{
+  \item The mock substrate starts only when that overlay is selected.
+  \item With the real base URL set, enrollment is attempted only against that URL.
+  \item If the configured IDRepo cannot be reached, enrollment fails and no second identity is created inside the gateway.
+  \item Staging and production use the same deployment job. Only environment values change.
+}
+
+\reqhead{BR-M-04}{No direct database access}{Met}
+The gateway reaches identity and login stores only through their published interfaces.
+\why{Real MOSIP will not give this gateway database credentials. SQL that leaks into the gateway has to be removed when the ministry's IDRepo arrives.}
+\accept{
+  \item Enrollment, credential issuance, and authenticate still succeed in a test when the gateway process has no database password.
+  \item The identity service is the component that uses the identity database.
+  \item Swapping the mock service for real MOSIP does not require the gateway to learn a new table layout.
+}
+
+\reqhead{BR-M-05}{Replaceable checks}{Missing}
+The presentation check, the template engine, and the matcher can each be replaced by configuration without changing the citizen form.
+\why{PAD and the face model will move onto services other teams own. Agencies cannot wait for a form redesign each time the model or the threshold changes.}
+\accept{
+  \item The browser still posts a face image and demographics, and the server still refuses a template supplied by the browser.
+  \item Authenticate returns the liveness result of the active presentation module and the match result of the active matcher.
+  \item Replacing either module leaves the IDRepo write and the Keycloak credential call on the same two steps.
+  \item A matcher outage leaves the enrolled UIN and any existing Keycloak user unchanged.
+  \item Templates already stored stay comparable under a published rule, or they are marked as requiring re-enrollment.
+}
+
+\reqhead{BR-M-06}{Downstream systems keep their own records}{Partial}
+eSignet, Inji, and AI-BioSDK keep their own records. The gateway integrates through their interfaces.
+\why{Those products belong to other workstreams and ship on their own cycle.}
+\accept{
+  \item No gateway setting contains a connection string for eSignet, Inji, or AI-BioSDK storage.
+  \item Issuing a login produces a Keycloak user that eSignet can use, without the gateway writing into eSignet's store.
+  \item A future match call sends a probe and receives a decision from AI-BioSDK.
+  \item Enrollment completes while Inji is absent.
+}
+
+\reqhead{BR-M-07}{Django and Celery stay off the identity path}{Met}
+Filing a citizen, issuing a login, and verifying a person finish without Django or Celery.
+\why{Staging and production share one deployment. A queue or an admin site on the critical path becomes another system every environment must run before a person can enroll.}
+\accept{
+  \item With the Celery worker and Django site stopped, enroll, credential issuance, and authenticate behave as they do with them running.
+  \item A deployment checklist for staging does not require a worker or a Django migration for identity.
+  \item If a later requirement introduces a queue, the citizen still receives a clear pending or failed outcome.
+}
+
+\reqhead{BR-M-08}{One owner per piece}{Partial}
+AIT owns the onboarding flow. IDRepo owns the citizen file. Keycloak owns the login. The PAD provider owns the liveness decision. The BioSDK owner owns the template and the match.
+\why{Unclear ownership turns every swap into a rewrite of enrollment.}
+\accept{
+  \item A face-model release does not require an enrollment-screen change.
+  \item A realm change does not require an IDRepo schema change.
+  \item A PAD change does not require a new credential flow.
+  \item One named owner accepts or rejects a production swap of each piece.
+}
+
+\section{Standardization}
+
+\reqhead{BR-T-01}{UIN is the only citizen identifier}{Partial}
+The only citizen identifier is a UIN from the MOSIP ID generator, and enrollment, verify, and Keycloak all use that value.
+\why{IDRepo, IDA, and the Keycloak \texttt{mosip} realm join a person on the UIN. A second number will not resolve in those systems.}
+\accept{
+  \item A new citizen receives a UIN only from the MOSIP ID generator.
+  \item Lookup, verification, and credential handoff use that same UIN.
+  \item A caller-chosen string is rejected.
+  \item If the generator is unavailable, no local number is minted and the person is not told they are enrolled.
+}
+
+\reqhead{BR-T-02}{A small demographic set}{Partial}
+The IDRepo identity for a portal release contains only UIN, legal name as a language-tagged value, and email, under a named ID schema version.
+\why{Real IDRepo validates the identity against an ID schema. An attribute the schema does not define is rejected, so later matchers never see a record that only the mock accepted.}
+\accept{
+  \item A successful enrollment shows UIN, full name as a language-and-value pair, and email, and names the ID schema version that was applied.
+  \item A subsequent read returns those same attributes.
+  \item Portrait bytes, timestamps, and match vectors stay out of the demographic object.
+}
+
+\reqhead{BR-T-03}{CBEFF is the biometric of record}{Partial}
+The biometric of record is one CBEFF face document, format owner 257 and format type 8, wrapping an ISO/IEC 19794-5 face image that a MOSIP parser accepts.
+\why{Format owner 257 and type 8 are how MOSIP IDA and a later BioSDK recognize a face record. A private list of numbers is not a biometric they can open.}
+\accept{
+  \item After enrollment, a read of the identity returns a biometric document whose format owner is 257 and whose format type is 8.
+  \item The biometric data block is an ISO/IEC 19794-5 face image a MOSIP parser accepts.
+  \item The server builds that record from the captured image. A caller-supplied vector is refused.
+  \item A shortened private header, a fixed quality score, or a sidecar embedding list is not the record IDA is asked to read.
+}
+
+\reqhead{BR-T-04}{The published IDRepo contract}{Partial}
+Create and read use the published MOSIP IDRepo v1 contract. A payload real IDRepo would reject fails enrollment.
+\why{A body that only the mock understands fails on a real IDRepo, so the UIN never becomes a record the rest of MOSIP can use.}
+\accept{
+  \item Create uses the MOSIP identity envelope and the published identity plus the biometrics document. Read uses the UIN identity route.
+  \item A payload that real IDRepo rejects fails the enrollment. The citizen is not told they are enrolled.
+  \item The mock's extra template list and raw-image fields remain a test double.
+  \item A remote rejection is shown as a failure.
+}
+
+\reqhead{BR-T-05}{Claims match the check that ran}{Partial}
+The portal says enroll, verify, and credential issue for three different outcomes, and claims ISO/IEC 30107-3 or a matcher score only when that check produced the result.
+\why{IDA and a future matcher will trust a liveness label and a score as evidence. A label with no evaluation becomes a false input. Partners will look for a biometric decision that was never produced if the head sweep is named authentication.}
+\accept{
+  \item Enroll returns an IDRepo result and does not take a password or claim a Keycloak account.
+  \item Verify returns only a verification result. Credential issue returns only whether the realm user was created for that UIN.
+  \item The head sweep is described as a submission check, and liveness stays negative while that is the check in force.
+  \item A cosine threshold, including 0.68, is shown only together with the matcher, the comparison, the score, and the threshold that were applied.
+}
+
+\reqhead{BR-T-06}{Credential issue stops at Keycloak}{Partial}
+The credential step creates a \texttt{mosip} realm user whose UIN attribute matches the IDRepo UIN, and stops there.
+\why{eSignet resolves the person through that attribute. A credential format invented here would diverge from the credential eSignet and Inji issue later.}
+\accept{
+  \item After credential issue, the realm user carries the same UIN as the identity record, and the password exists only in Keycloak.
+  \item Documentation names eSignet and Inji as downstream consumers of that UIN.
+  \item This product does not issue an OIDC token or an Inji verifiable credential.
+  \item The realm user is not marked biometrics-valid until the presentation check and a real matcher have both passed.
+}
+
+\reqhead{BR-T-07}{A versioned portal contract}{Missing}
+Citizen-facing behavior is published as a portal API version, separate from the MOSIP envelope version.
+\why{IDRepo, IDA, and Keycloak will keep their own contracts while this portal changes. Partners need to know which portal behavior produced a UIN and a biometric record.}
+\accept{
+  \item The portal contract in use carries a version, and that version's field set, identifier rules, and result meanings are written down.
+  \item Two calls on the same version return the same shapes for enroll, verify, and credential issue.
+  \item The field set, the UIN rules, and the meaning of a pass stay fixed inside one portal version.
+  \item The MOSIP envelope version is not reused as the name of the portal API.
+}
+
+\reqhead{BR-T-08}{Staging and production make the same promise}{Partial}
+Staging and production expose the same UIN rules, the same demographic set, the same CBEFF biometric, and the same claim wording.
+\why{Production IDRepo will accept only the published contract. A looser staging mock trains operators to rely on behavior production will reject.}
+\accept{
+  \item The same portal version, field set, and claim wording are what smoke-tested staging and production expose.
+  \item A record accepted in staging is one the production IDRepo contract would accept.
+  \item Staging is described as the mock while it is still the mock.
+}
+
+\section{Where the prototype stands}
+
+Two requirements are already met. The gateway reaches identity and login stores through their published interfaces (BR-M-04). Django and Celery are off the enrollment path (BR-M-07).
+
+The open gaps are consent before capture, an audit trail, restricted access to face images, an assisted path for people who cannot complete the sweep, Thai and English copy, a versioned portal contract, and a presentation check and matcher that can be selected by configuration without rewriting the enrollment form.
+
+\vspace{1.1em}
+{\color{rule}\rule{\textwidth}{0.4pt}}\\[0.45em]
+{\small\color{muted}
+Source note. This document consolidates four parallel reviews of the repository on 12 November 2026: accessibility of the browser flow, security of proofing and credentials, modularity of IDRepo, Keycloak, and the biometric checks, and standardization against the MOSIP identity contract. Status labels describe that prototype. They are not a certification.\par
+}
+
+\end{document}

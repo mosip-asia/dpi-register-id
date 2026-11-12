@@ -8,6 +8,7 @@ This directory contains technical architecture specifications, deployment proced
 
 | Document | Description |
 |---|---|
+| **[`business-requirements.pdf`](business-requirements.pdf)** | **Business requirements:** Accessibility, security, modularity, and standardization for the gateway, with a walkthrough of enrollment and 1:1 authentication against [`diagrams/current-system.pdf`](diagrams/current-system.pdf). Source: [`business-requirements.tex`](business-requirements.tex). |
 | **[`user-manual.md`](user-manual.md)** | **Hands-On User Manual:** Step-by-step walkthrough for developers to spin up the stack, test WebRTC liveness, enroll citizen biometrics into IDRepo, verify 1:1 match, and test spoof rejection. |
 | **[`objectives-and-milestones.md`](objectives-and-milestones.md)** | **Primary Project Specification:** Zero-hardware citizen onboarding, ISO/IEC 30107-3 PAD liveness, ISO 19794-5 CBEFF packaging, MOSIP IDRepo & Keycloak IAM bridge, RACI matrix, and 8-week delivery milestones (Weeks 1–8). |
 | **[`deployment.md`](deployment.md)** | **Deployment & Infrastructure Guide:** GitHub Actions multi-environment CD pipeline (`cd.yml`), NetBird VPN mesh setup, Traefik reverse proxy overlay, and automated host rollbacks (`.deploy_success`). |
