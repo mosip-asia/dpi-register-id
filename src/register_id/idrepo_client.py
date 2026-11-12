@@ -26,6 +26,60 @@ logger = logging.getLogger(__name__)
 MOSIP_IDREPO_BASE_URL = os.getenv("MOSIP_IDREPO_BASE_URL", "http://localhost:8081").rstrip("/")
 
 
+def _parse_embedding(value: Any) -> Any:
+    """Decode a template vector when the wire format stored it as JSON text."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+    return value
+
+
+def _record_from_read_response(data: dict[str, Any], uin: str) -> dict[str, Any]:
+    """Map a MOSIP GetIdentity envelope onto demographics. Vectors are not copied."""
+    resp = data.get("response") or {}
+    identity = resp.get("identity") or {}
+    documents = resp.get("documents") or []
+
+    full_name_raw = identity.get("fullName", "")
+    if isinstance(full_name_raw, list) and len(full_name_raw) > 0:
+        full_name = full_name_raw[0].get("value", "")
+    else:
+        full_name = str(full_name_raw)
+
+    cbeff_xml = None
+    for doc in documents:
+        if doc.get("category") == "individualBiometrics":
+            b64val = doc.get("value", "")
+            try:
+                padded = b64val + "=" * (-len(b64val) % 4)
+                cbeff_xml = base64.urlsafe_b64decode(padded).decode("utf-8")
+            except Exception:
+                cbeff_xml = b64val
+            break
+
+    return {
+        "uin": identity.get("UIN", uin),
+        "full_name": full_name,
+        "email": identity.get("email"),
+        "face_image": identity.get("faceImage"),
+        "cbeff_xml": cbeff_xml,
+        "created_at": identity.get("createdAt"),
+    }
+
+
+def _templates_from_body(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = data.get("templates") or []
+    parsed = []
+    for row in rows:
+        parsed.append({
+            "sector": row.get("sector"),
+            "embedding": _parse_embedding(row.get("embedding")),
+        })
+    return parsed
+
+
 class IDRepoClient:
     """
     Client for interacting with the MOSIP IDRepo service over HTTP REST.
@@ -103,12 +157,14 @@ class IDRepoClient:
         full_name: str,
         email: str | None = None,
         face_image: str | None = None,
-        face_embedding: list[float] | None = None,
         cbeff_xml: str | None = None,
+        templates: list | None = None,
     ) -> bool:
         """
         Enrolls or updates an identity in MOSIP IDRepo via POST /idrepository/v1/identity/.
-        Packages payload into the official MOSIP envelope.
+
+        Demographics stay in request.identity. Match vectors travel in request.templates
+        and are not written onto the identity row.
         """
         documents = []
         if cbeff_xml:
@@ -118,23 +174,26 @@ class IDRepoClient:
                 "value": cbeff_b64url,
             })
 
+        request_body: dict[str, Any] = {
+            "registrationId": self._make_rid(),
+            "status": "ACTIVATED",
+            "identity": {
+                "UIN": uin,
+                "fullName": [{"language": "eng", "value": full_name}],
+                "email": email,
+                "faceImage": face_image,
+            },
+            "documents": documents,
+        }
+        if templates is not None:
+            request_body["templates"] = templates
+
         payload = {
             "id": "mosip.id.create",
             "version": "v1",
             "requesttime": self._now_iso(),
             "metadata": {},
-            "request": {
-                "registrationId": self._make_rid(),
-                "status": "ACTIVATED",
-                "identity": {
-                    "UIN": uin,
-                    "fullName": [{"language": "eng", "value": full_name}],
-                    "email": email,
-                    "faceImage": face_image,
-                    "faceEmbedding": face_embedding,
-                },
-                "documents": documents,
-            },
+            "request": request_body,
         }
 
         self.last_error = None
@@ -189,37 +248,7 @@ class IDRepoClient:
         try:
             r = requests.get(f"{self.base_url}/idrepository/v1/identity/uin/{uin}", timeout=3)
             if r.status_code == 200:
-                data = r.json()
-                resp = data.get("response", {})
-                identity = resp.get("identity", {})
-                documents = resp.get("documents", [])
-
-                full_name_raw = identity.get("fullName", "")
-                if isinstance(full_name_raw, list) and len(full_name_raw) > 0:
-                    full_name = full_name_raw[0].get("value", "")
-                else:
-                    full_name = str(full_name_raw)
-
-                # Extract CBEFF
-                cbeff_xml = None
-                for doc in documents:
-                    if doc.get("category") == "individualBiometrics":
-                        b64val = doc.get("value", "")
-                        try:
-                            padded = b64val + "=" * (-len(b64val) % 4)
-                            cbeff_xml = base64.urlsafe_b64decode(padded).decode("utf-8")
-                        except Exception:
-                            cbeff_xml = b64val
-
-                return {
-                    "uin": identity.get("UIN", uin),
-                    "full_name": full_name,
-                    "email": identity.get("email"),
-                    "face_image": identity.get("faceImage"),
-                    "face_embedding": identity.get("faceEmbedding"),
-                    "cbeff_xml": cbeff_xml,
-                    "created_at": identity.get("createdAt"),
-                }
+                return _record_from_read_response(r.json(), uin)
         except Exception as e:
             logger.debug(f"IDRepo remote get failed: {e}")
 
@@ -229,40 +258,36 @@ class IDRepoClient:
                 client = self._get_test_client()
                 r = client.get(f"/idrepository/v1/identity/uin/{uin}")
                 if r.status_code == 200:
-                    data = r.json()
-                    resp = data.get("response", {})
-                    identity = resp.get("identity", {})
-                    documents = resp.get("documents", [])
-
-                    full_name_raw = identity.get("fullName", "")
-                    if isinstance(full_name_raw, list) and len(full_name_raw) > 0:
-                        full_name = full_name_raw[0].get("value", "")
-                    else:
-                        full_name = str(full_name_raw)
-
-                    cbeff_xml = None
-                    for doc in documents:
-                        if doc.get("category") == "individualBiometrics":
-                            b64val = doc.get("value", "")
-                            try:
-                                padded = b64val + "=" * (-len(b64val) % 4)
-                                cbeff_xml = base64.urlsafe_b64decode(padded).decode("utf-8")
-                            except Exception:
-                                cbeff_xml = b64val
-
-                    return {
-                        "uin": identity.get("UIN", uin),
-                        "full_name": full_name,
-                        "email": identity.get("email"),
-                        "face_image": identity.get("faceImage"),
-                        "face_embedding": identity.get("faceEmbedding"),
-                        "cbeff_xml": cbeff_xml,
-                        "created_at": identity.get("createdAt"),
-                    }
+                    return _record_from_read_response(r.json(), uin)
             except Exception as e:
                 logger.error(f"In-process IDRepo fallback get failed: {e}")
 
         return None
+
+    def get_face_templates(self, uin: str) -> list[dict[str, Any]]:
+        """
+        Load match vectors from GET /ida/v1/face-template/uin/{uin}.
+
+        Remote is tried first, then the in-process mock. An empty list means
+        the UIN has no templates (or both calls failed).
+        """
+        try:
+            r = requests.get(f"{self.base_url}/ida/v1/face-template/uin/{uin}", timeout=3)
+            if r.status_code == 200:
+                return _templates_from_body(r.json())
+        except Exception as e:
+            logger.debug(f"IDRepo remote face-template get failed: {e}")
+
+        if self.enable_inprocess_fallback:
+            try:
+                client = self._get_test_client()
+                r = client.get(f"/ida/v1/face-template/uin/{uin}")
+                if r.status_code == 200:
+                    return _templates_from_body(r.json())
+            except Exception as e:
+                logger.error(f"In-process IDRepo fallback face-template get failed: {e}")
+
+        return []
 
     def list_identities(self, limit: int = 50) -> list[dict[str, Any]]:
         """

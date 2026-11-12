@@ -5,13 +5,14 @@ Exposes endpoints for citizen enrollment, ISO 30107-3 PAD liveness,
 1:1 biometric matching, and registry listing.
 """
 
-import json
 import logging
+
 from fastapi import APIRouter, HTTPException
 from register_id.cbeff import build_cbeff_xml, extract_jpeg_bytes
+from register_id.embedder import embed_face_image
 from register_id.idrepo import get_idrepo_client
 from register_id.keycloak import get_keycloak_client
-from register_id.liveness import evaluate_liveness
+from register_id.liveness import create_liveness_challenge, evaluate_liveness
 from register_id.matcher import match_embeddings
 from register_id.models import (
     AuthRequest,
@@ -22,11 +23,19 @@ from register_id.models import (
     LivenessRequest,
     LivenessResponse,
 )
-from register_id.liveness import create_liveness_challenge, evaluate_liveness
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["register_id"])
+
+MATCH_THRESHOLD = 0.50
+
+
+def _embed_or_422(image: str) -> list[float]:
+    try:
+        return embed_face_image(image)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/idgenerator/uin")
@@ -95,14 +104,13 @@ def check_liveness_endpoint(req: LivenessRequest):
 @router.post("/enroll")
 def enroll_citizen_endpoint(req: EnrollRequest):
     """
-    Enrolls a citizen face through the MOSIP IDRepo REST interface and provisions Keycloak IAM:
-    1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
-    2. Calls MOSIP IDRepo POST /idrepository/v1/identity/ with official JSON envelope.
-    3. Asynchronously provisions the citizen account in Keycloak IAM for eSignet OIDC login.
+    Enrolls a citizen face through the MOSIP IDRepo REST interface and provisions Keycloak IAM.
+
+    The frontal template is computed from the image bytes. A client-supplied
+    embedding is not accepted. The password is still provisioned here.
     """
     idrepo = get_idrepo_client()
 
-    # 1. Build CBEFF XML from JPEG payload
     cbeff_xml = None
     try:
         jpeg_bytes = extract_jpeg_bytes(req.faceImage)
@@ -110,14 +118,14 @@ def enroll_citizen_endpoint(req: EnrollRequest):
     except Exception as e:
         logger.warning(f"Could not construct CBEFF XML (storing raw data): {e}")
 
-    # 2. Persist to IDRepo via MOSIP REST Interface
+    templates = [{"sector": "front", "embedding": _embed_or_422(req.faceImage)}]
     saved = idrepo.add_identity(
         uin=req.uin,
         full_name=req.fullName,
         email=req.email,
         face_image=req.faceImage,
-        face_embedding=req.faceEmbedding,
         cbeff_xml=cbeff_xml,
+        templates=templates,
     )
     if not saved:
         error_msg = getattr(idrepo, "last_error", None) or "Failed to persist identity in MOSIP IDRepo"
@@ -127,7 +135,6 @@ def enroll_citizen_endpoint(req: EnrollRequest):
             detail=f"MOSIP IDRepo enrollment failed: {error_msg}",
         )
 
-    # 3. Synchronize with Keycloak IAM
     keycloak = get_keycloak_client()
     keycloak_ok = keycloak.provision_citizen(
         uin=req.uin,
@@ -150,28 +157,23 @@ def enroll_citizen_endpoint(req: EnrollRequest):
 @router.post("/authenticate", response_model=AuthResponse)
 def authenticate_citizen_endpoint(req: AuthRequest):
     """
-    MOSIP BioSDK SPI Contract: IBioApi.match() (1:1 Biometric Verification)
-    Fetches citizen gallery template from IDRepo REST API and compares with live probe.
+    1:1 check of the live probe against the frontal template in the IDA table.
     """
     idrepo = get_idrepo_client()
     citizen = idrepo.get_identity(req.uin)
     if not citizen:
         raise HTTPException(status_code=404, detail=f"Citizen UIN '{req.uin}' not found in registry.")
 
-    stored_embedding_raw = citizen["face_embedding"]
-    if isinstance(stored_embedding_raw, str):
-        stored_embedding = json.loads(stored_embedding_raw)
-    else:
-        stored_embedding = stored_embedding_raw
+    templates = idrepo.get_face_templates(req.uin)
+    front = next((item["embedding"] for item in templates if item["sector"] == "front"), None)
+    if not isinstance(front, list):
+        raise HTTPException(status_code=404, detail=f"No frontal template stored for UIN '{req.uin}'.")
 
-    # 1:1 Metric Comparison (Euclidean distance threshold = 0.50)
     is_match, distance, match_score = match_embeddings(
-        stored=stored_embedding,
+        stored=front,
         probe=req.liveEmbedding,
-        threshold=0.50,
+        threshold=MATCH_THRESHOLD,
     )
-
-    # Both Biometric Match AND Liveness PAD must pass
     verified = is_match and req.livenessPassed
 
     jwt_token = (
@@ -188,7 +190,7 @@ def authenticate_citizen_endpoint(req: AuthRequest):
         euclideanDistance=distance,
         matchScore=match_score,
         livenessScore=req.livenessScore,
-        threshold=0.50,
+        threshold=MATCH_THRESHOLD,
         citizen={
             "uin": citizen["uin"],
             "fullName": citizen["full_name"],

@@ -11,9 +11,7 @@ Implements the official MOSIP specifications:
 """
 
 import base64
-import json
 import logging
-import os
 import random
 from datetime import datetime, timezone
 
@@ -90,7 +88,8 @@ def add_identity(payload: dict):
       "request": {
          "registrationId": "...",
          "status": "ACTIVATED",
-         "identity": { "UIN": "...", "fullName": [...], "email": "...", "faceEmbedding": [...], "faceImage": "..." },
+         "identity": { "UIN": "...", "fullName": [...], "email": "...", "faceImage": "..." },
+         "templates": [ { "sector": "front", "embedding": [0.1, "..."] } ],
          "documents": [ { "category": "individualBiometrics", "value": "base64url..." } ]
       }
     }
@@ -121,7 +120,8 @@ def add_identity(payload: dict):
 
     email = identity.get("email")
     face_image = identity.get("faceImage")
-    face_embedding = identity.get("faceEmbedding")
+    # Client faceEmbedding / faceViews are ignored. Vectors arrive as request.templates.
+    templates = req.get("templates")
 
     # Extract CBEFF XML from individualBiometrics document
     cbeff_xml = None
@@ -141,9 +141,20 @@ def add_identity(payload: dict):
         full_name=full_name,
         email=email,
         face_image=face_image,
-        face_embedding=face_embedding,
         cbeff_xml=cbeff_xml,
     )
+
+    if saved and templates is not None:
+        if not isinstance(templates, list):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "id": "mosip.id.create",
+                    "version": "v1",
+                    "errors": [{"errorCode": "IDR-IDC-004", "message": "templates must be a list"}],
+                },
+            )
+        saved = storage.save_face_templates(str(uin), templates)
 
     if not saved:
         raise HTTPException(
@@ -201,13 +212,6 @@ def get_identity_by_uin(uin: str):
             "value": cbeff_b64url,
         })
 
-    face_embedding = record.get("face_embedding")
-    if isinstance(face_embedding, str):
-        try:
-            face_embedding = json.loads(face_embedding)
-        except Exception:
-            pass
-
     return {
         "id": "mosip.id.read",
         "version": "v1",
@@ -220,12 +224,42 @@ def get_identity_by_uin(uin: str):
                 "fullName": [{"language": "eng", "value": record["full_name"]}],
                 "email": record.get("email"),
                 "faceImage": record.get("face_image"),
-                "faceEmbedding": face_embedding,
                 "createdAt": str(record.get("created_at")),
             },
             "documents": documents,
         },
         "errors": None,
+    }
+
+
+@idrepo_app.get("/ida/v1/face-template/uin/{uin}")
+def get_face_templates(uin: str):
+    """
+    IDA read path for match vectors. Identity demographics are not included.
+    404 when the UIN has no identity row or no stored templates.
+    """
+    record = storage.get_identity(uin)
+    templates = storage.get_face_templates(uin) if record else []
+    if not record or not templates:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "id": "mosip.ida.face.read",
+                "version": "v1",
+                "errors": [
+                    {
+                        "errorCode": "IDA-FTA-002",
+                        "message": f"Face templates not found for UIN '{uin}'",
+                    }
+                ],
+            },
+        )
+
+    return {
+        "templates": [
+            {"sector": item["sector"], "embedding": item["embedding"]}
+            for item in templates
+        ]
     }
 
 

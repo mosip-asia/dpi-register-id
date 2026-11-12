@@ -37,7 +37,6 @@ class EnrollRequest(BaseModel):
     fullName: str = Field(..., min_length=1, max_length=128, description="Citizen full legal name")
     email: str = Field(..., max_length=128, description="Citizen email address")
     faceImage: str = Field(..., description="Base64-encoded face image (JPEG/PNG data URL)")
-    faceEmbedding: list[float] = Field(..., description="128-D facial feature descriptor vector")
     password: str = Field(default="CitizenPass123!", description="Initial password for Keycloak IAM")
 
 
