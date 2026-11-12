@@ -1,0 +1,172 @@
+% Functions linked from the diagram. Input by current-system.tex.
+\clearpage
+\pagewidth=420mm
+\pageheight=297mm
+\setlength{\oddsidemargin}{\dimexpr12mm-1in\relax}
+\setlength{\evensidemargin}{\dimexpr12mm-1in\relax}
+\setlength{\topmargin}{\dimexpr12mm-1in\relax}
+\setlength{\headheight}{0pt}
+\setlength{\headsep}{0pt}
+\setlength{\textwidth}{\dimexpr\pagewidth-24mm\relax}
+\setlength{\textheight}{\dimexpr\pageheight-24mm\relax}
+\setlength{\hsize}{\textwidth}
+\setlength{\linewidth}{\textwidth}
+\setlength{\columnwidth}{\textwidth}
+\pagestyle{plain}
+\sloppy
+\setlength{\emergencystretch}{2em}
+\lstset{%
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  numbers=left,
+  numberstyle=\tiny\color{muted},
+  numbersep=10pt,
+  frame=leftline,
+  framerule=1.2pt,
+  rulecolor=\color{green},
+  xleftmargin=2.2em,
+  framesep=5pt,
+  aboveskip=6pt,
+  belowskip=10pt,
+  tabsize=4,
+  upquote=true,
+  literate=
+    {—}{{---}}3
+    {–}{{--}}2
+    {·}{{.}}1
+    {…}{{...}}3
+    {🎉}{{ }}1
+    {❌}{{X}}1
+}
+
+\newcommand{\snippet}[3]{%
+  \par
+  {\sffamily\footnotesize\color{muted}\detokenize{#1}, lines #2--#3}\par
+  \lstinputlisting[firstline=#2, lastline=#3, firstnumber=#2]{#1}%
+}
+\newcommand{\back}{\par{\sffamily\small\hyperlink{diagram}{Back to the diagram}}\par\vspace{0.4em}}
+
+{\sffamily\bfseries\Large\color{green} Functions behind the diagram}\par
+\vspace{0.4em}
+{\sffamily\small The line numbers are the line numbers in the source files.
+Click a box on the first page to land on its section.
+Where the running code has moved on from the label in the box, the note under the heading says what the function does now.}
+
+\section{Browser models}
+\label{sec:models}
+\back
+{\sffamily\small\color{ink}SSD MobileNet v1 and the 68-landmark net are loaded in the page and run on each frame.
+faceRecognitionNet is loaded in the same call and is not used: \texttt{analyzeSource} asks only for a box and landmarks.}
+
+\snippet{../../src/project/web/templates/index.html}{605}{638}
+\snippet{../../src/project/web/templates/index.html}{891}{910}
+
+\clearpage
+\section{Browser measurements and JPEG frames}
+\label{sec:browser}
+\back
+{\sffamily\small\color{ink}Eye-aspect ratio, yaw, and the five sector bins are computed in the page from the landmarks.
+\texttt{commitSector} stores a JPEG data URL. \texttt{viewsPayload} is what later gets posted. No embedding is built here.}
+
+\snippet{../../src/project/web/templates/index.html}{392}{399}
+\snippet{../../src/project/web/templates/index.html}{427}{433}
+\snippet{../../src/project/web/templates/index.html}{483}{542}
+\snippet{../../src/project/web/templates/index.html}{655}{661}
+
+\clearpage
+\section{Enroll request}
+\label{sec:enroll-request}
+\back
+{\sffamily\small\color{ink}\texttt{captureAndEnroll} posts the UIN, name, email, and JPEG data URLs.
+A live camera also sends \texttt{faceViews}. The body has no embedding field.}
+
+\snippet{../../src/project/web/templates/index.html}{1168}{1206}
+
+\clearpage
+\section{Server enroll}
+\label{sec:enroll-server}
+\back
+{\sffamily\small\color{ink}\texttt{enroll\_citizen\_endpoint} builds the CBEFF XML, then hashes each JPEG.
+\texttt{embed\_face\_image} is that hash. It is not a face model.
+\texttt{\_templates\_for\_enrollment} refuses to trust a vector that arrived from the browser.}
+
+\snippet{../../src/register_id/api.py}{38}{73}
+\snippet{../../src/register_id/api.py}{146}{191}
+\snippet{../../src/register_id/embedder.py}{15}{44}
+
+\clearpage
+\section{Database write}
+\label{sec:db-write}
+\back
+{\sffamily\small\color{ink}The gateway posts to IDRepo. The mock service writes the JPEG and CBEFF onto \texttt{citizen\_identity}, and the 128-D vectors onto \texttt{face\_template}. FastAPI does not open SQL.}
+
+\snippet{../../src/register_id/idrepo_client.py}{154}{241}
+\snippet{../../src/mock/idrepo/storage.py}{173}{267}
+\snippet{../../db/init-idrepo.sql}{1}{29}
+
+\clearpage
+\section{Enroll response}
+\label{sec:enroll-response}
+\back
+{\sffamily\small\color{ink}The endpoint returns status, UIN, and name. The vector and the JPEG are not in that JSON.}
+
+\snippet{../../src/register_id/api.py}{183}{190}
+
+\clearpage
+\section{Liveness numbers}
+\label{sec:liveness}
+\back
+{\sffamily\small\color{ink}\texttt{evaluate\_liveness} is still the body of \texttt{POST /api/checkLiveness}: blink count and eye-aspect thresholds, no pixels.
+On the authenticate path the page does not call that route. Opening the camera posts \texttt{/api/sweep/challenge} instead, and the later authenticate body sends \texttt{livenessPassed: false}.}
+
+\snippet{../../src/register_id/api.py}{139}{144}
+\snippet{../../src/register_id/liveness.py}{54}{106}
+\snippet{../../src/project/web/templates/index.html}{581}{601}
+\snippet{../../src/register_id/api.py}{94}{99}
+\snippet{../../src/register_id/sweep.py}{42}{63}
+
+\clearpage
+\section{Authenticate request}
+\label{sec:auth-request}
+\back
+{\sffamily\small\color{ink}The page posts the UIN, the sweep challenge id, and the five JPEG views.
+\texttt{livenessScore} is 0 and \texttt{livenessPassed} is false. No embedding is sent.}
+
+\snippet{../../src/project/web/templates/index.html}{1290}{1328}
+
+\clearpage
+\section{Server check of the five images}
+\label{sec:match}
+\back
+{\sffamily\small\color{ink}\texttt{POST /api/authenticate} calls \texttt{assess\_sweep}.
+That check hashes each JPEG only to reject a repeated picture, and it checks that the client yaw labels run left to right.
+It does not compare the probe with the stored gallery, and it does not treat the result as a face match. \texttt{isFaceMatch} is returned false.}
+
+\snippet{../../src/register_id/api.py}{219}{254}
+\snippet{../../src/register_id/sweep.py}{31}{39}
+\snippet{../../src/register_id/sweep.py}{90}{162}
+\snippet{../../src/register_id/matcher.py}{11}{54}
+
+\clearpage
+\section{Database read}
+\label{sec:db-read}
+\back
+{\sffamily\small\color{ink}Authenticate loads the identity row so the response can name the citizen.
+\texttt{get\_face\_templates} is the read of the stored vectors. The authenticate endpoint above does not call it.}
+
+\snippet{../../src/register_id/idrepo_client.py}{243}{265}
+\snippet{../../src/register_id/idrepo_client.py}{267}{290}
+\snippet{../../src/mock/idrepo/storage.py}{279}{308}
+
+\clearpage
+\section{Authenticate response}
+\label{sec:auth-response}
+\back
+{\sffamily\small\color{ink}The page shows the sweep message. The JSON still carries distance and score fields; the endpoint fills distance with 1 and the score with 0, and it does not return an embedding or an image.}
+
+\snippet{../../src/register_id/api.py}{236}{254}
+\snippet{../../src/project/web/templates/index.html}{1329}{1370}
