@@ -32,7 +32,7 @@
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link fw-bold text-secondary" id="auth-tab" onclick="switchTab('auth')" type="button">
-        2. Live 1:1 Authentication & PAD
+        2. Head-sweep verification
       </button>
     </li>
   </ul>
@@ -43,9 +43,9 @@
     <div class="col-lg-7">
       <div class="card shadow-sm border-0 bg-dark text-white rounded-3 overflow-hidden position-relative" style="min-height: 440px;">
         <!-- Video Feed -->
-        <video id="webcam" autoplay playsinline muted class="w-100 h-100 object-fit-cover d-none" style="transform: scaleX(-1);"></video>
-        <img id="preview-img" class="w-100 h-100 object-fit-contain d-none" alt="Selfie preview" />
-        <canvas id="overlay" class="position-absolute top-0 start-0 w-100 h-100"></canvas>
+        <video id="webcam" autoplay playsinline muted class="position-absolute top-0 start-0 w-100 h-100 object-fit-cover d-none" style="transform: scaleX(-1);"></video>
+        <img id="preview-img" class="position-absolute top-0 start-0 w-100 h-100 object-fit-contain d-none" alt="Selfie preview" />
+        <canvas id="overlay" class="position-absolute top-0 start-0 w-100 h-100" style="transform: scaleX(-1); object-fit: cover; pointer-events: none;"></canvas>
 
         <!-- Placeholder when camera is off -->
         <div id="cam-placeholder" class="position-absolute top-50 start-50 translate-middle text-center p-4">
@@ -72,6 +72,45 @@
         </div>
       </div>
 
+      <div id="sweep-row" class="mt-3">
+        <p id="sweep-instruction" class="small text-muted mb-2">
+          Fit your face in the oval, then slowly turn from your left shoulder to your right. Hold each pose until the chip turns green.
+        </p>
+        <div class="d-flex flex-wrap gap-2" id="sweep-chips" role="group" aria-label="Head sweep sectors">
+          <button type="button" id="chip-far-left" class="btn btn-outline-secondary btn-sm disabled" disabled>Far left</button>
+          <button type="button" id="chip-left" class="btn btn-outline-secondary btn-sm disabled" disabled>Left</button>
+          <button type="button" id="chip-front" class="btn btn-outline-secondary btn-sm disabled" disabled>Front</button>
+          <button type="button" id="chip-right" class="btn btn-outline-secondary btn-sm disabled" disabled>Right</button>
+          <button type="button" id="chip-far-right" class="btn btn-outline-secondary btn-sm disabled" disabled>Far right</button>
+        </div>
+      </div>
+
+      <details id="diag-panel" class="mt-3 border rounded-3 bg-light" open>
+        <summary class="px-3 py-2 small fw-semibold user-select-none" style="cursor: pointer;">
+          Diagnostics — EAR / blink · rotation · matching
+        </summary>
+        <div class="px-3 pb-3">
+          <div class="row g-2 small font-monospace">
+            <div class="col-md-4">
+              <div class="fw-bold text-uppercase text-muted mb-1" style="font-size: 0.7rem;">EAR / Blink</div>
+              <div id="diag-ear" class="bg-white border rounded p-2" style="min-height: 9.5rem; white-space: pre-wrap; line-height: 1.35;"></div>
+            </div>
+            <div class="col-md-4">
+              <div class="fw-bold text-uppercase text-muted mb-1" style="font-size: 0.7rem;">Rotation / Sweep</div>
+              <div id="diag-rotation" class="bg-white border rounded p-2" style="min-height: 9.5rem; white-space: pre-wrap; line-height: 1.35;"></div>
+            </div>
+            <div class="col-md-4">
+              <div class="fw-bold text-uppercase text-muted mb-1" style="font-size: 0.7rem;">Match / PAD</div>
+              <div id="diag-match" class="bg-white border rounded p-2" style="min-height: 9.5rem; white-space: pre-wrap; line-height: 1.35;"></div>
+            </div>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <div id="diag-event" class="small text-muted font-monospace">Waiting for camera…</div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearDiagnostics()">Clear log</button>
+          </div>
+        </div>
+      </details>
+
       <!-- Action Buttons below Viewfinder -->
       <div class="d-flex justify-content-between align-items-center mt-3">
         <div class="btn-group">
@@ -82,7 +121,7 @@
             📁 Upload Photo
             <input type="file" id="file-input" accept="image/*" class="d-none" onchange="handleFileUpload(event)">
           </label>
-          <button id="btn-skip-blink" onclick="skipBlinkCheck()" class="btn btn-outline-warning btn-sm fw-semibold" title="Bypass blink detection if lighting/webcam prevents reliable EAR tracking">
+          <button id="btn-skip-blink" onclick="skipBlinkCheck()" type="button" class="btn btn-outline-warning btn-sm fw-semibold" title="Record a blink override when the webcam cannot track EAR. The head sweep is still required.">
             ⚡ Skip Blink
           </button>
         </div>
@@ -95,7 +134,7 @@
 
         <div id="auth-btn-container" class="d-none">
           <button id="btn-capture-auth" onclick="captureAndAuthenticate()" class="btn btn-success fw-bold px-4 shadow-sm" disabled>
-            🛡️ Verify 1:1 Match & PAD
+            Verify head sweep
           </button>
         </div>
       </div>
@@ -120,10 +159,6 @@
           <label class="form-label small text-muted font-monospace mb-1">Email Address</label>
           <input id="in-email" type="email" placeholder="e.g. citizen@ait.asia" class="form-control">
         </div>
-        <div class="mb-3">
-          <label class="form-label small text-muted font-monospace mb-1">Keycloak Initial Password</label>
-          <input id="in-password" type="password" value="CitizenPass123!" class="form-control font-monospace">
-        </div>
 
         <!-- Result Box -->
         <div id="enroll-result" class="alert alert-secondary d-none small mb-0 mt-2"></div>
@@ -132,7 +167,7 @@
       <!-- Tab 2: 1:1 Authentication Panel -->
       <div id="panel-auth" class="card shadow-sm border-0 p-4 d-none">
         <h5 class="fw-bold mb-3 d-flex align-items-center gap-2">
-          <span>🛡️</span> 1:1 Biometric Match & PAD
+          <span>🛡️</span> Head-sweep verification
         </h5>
 
         <div class="mb-3">
@@ -142,9 +177,9 @@
 
         <!-- Liveness Instruction Box -->
         <div class="alert alert-info border-info small mb-3">
-          <div class="fw-bold mb-1">👁️ Presentation Attack Detection (PAD Active):</div>
+          <div class="fw-bold mb-1">Head sweep is the verification step</div>
           <div class="text-secondary" style="font-size: 0.85rem;">
-            Look at the camera and <b>blink your eyes naturally</b> during capture. Static photo spoofs will be rejected under ISO/IEC 30107-3 rules!
+            Turn from your left shoulder to your right until every chip is green. Blinks are shown for diagnostics and do not decide the result. This check accepts five distinct images in yaw order. It does not compare identity and it does not prove a live head turn.
           </div>
         </div>
 
@@ -156,16 +191,34 @@
 </div>
 
 <!-- Vladmandic Face-API for Client-Side Landmark & Descriptor Extraction -->
-<script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
 
 <script>
-  let currentDescriptor = null;
   let currentImageBase64 = null;
+  let enrolledCredentialUin = null;
+  let faceCurrentlyAccepted = false;
   const video = document.getElementById('webcam');
   const previewImg = document.getElementById('preview-img');
   const overlay = document.getElementById('overlay');
   const placeholder = document.getElementById('cam-placeholder');
   let modelsLoaded = false;
+  let modelsLoading = null;
+  let faceTimer = null;
+  let detecting = false;
+  let frameGeneration = 0;
+
+  const SWEEP_SECTORS = ['far-left', 'left', 'front', 'right', 'far-right'];
+  const SECTOR_LABELS = {
+    'far-left': 'Far left',
+    'left': 'Left',
+    'front': 'Front',
+    'right': 'Right',
+    'far-right': 'Far right'
+  };
+  let sweepSamples = emptySweep();
+  let pendingSector = null;
+  let pendingStreak = 0;
+  let frontalSnapshot = null;
 
   // Liveness & Challenge Variables
   let blinkCount = 0;
@@ -176,27 +229,338 @@
   let challengeBlinks = 0;
   let lastBlinkTime = 0;
   let isBypassed = false;
+  let earBaseline = 0.0; // rolling open-eye EAR for adaptive blinks
+  let pitchBaseline = 0.0;
+  let eyesClosed = false;
+  let eyesClosedSince = 0;
+  let closePitch = 0.0;
+  let closeYaw = 0.0;
 
-  function skipBlinkCheck() {
-    isBypassed = true;
-    blinkCount = Math.max(blinkCount, 2);
-    minEarObserved = 0.18;
-    maxEarObserved = 0.32;
-    challengeBlinks = 2;
+  const diag = {
+    ear: 0,
+    leftEar: 0,
+    rightEar: 0,
+    baseline: 0,
+    closeThreshold: 0,
+    openThreshold: 0,
+    absoluteClose: false,
+    eyesClosed: false,
+    closedMs: 0,
+    earGap: 0,
+    widthRatio: 0,
+    minWidthRatio: 0,
+    pitch: null,
+    pitchBaseline: 0,
+    eyeGate: '—',
+    blinkReject: '',
+    blinks: 0,
+    challengeBlinks: 0,
+    challengeTarget: 0,
+    minEar: 1,
+    maxEar: 0,
+    earDelta: 0,
+    yaw: null,
+    sector: null,
+    pendingSector: null,
+    pendingStreak: 0,
+    faces: 0,
+    accepted: 0,
+    confidence: null,
+    ovalOk: false,
+    fpsHint: '—',
+    lastDetectMs: 0,
+    match: {
+      status: 'idle',
+      padPassed: null,
+      padScore: null,
+      padMessage: null,
+      isFaceMatch: null,
+      verified: null,
+      distance: null,
+      matchScore: null,
+      threshold: 0.50,
+      message: null
+    },
+    events: []
+  };
+  let diagLastFrameAt = 0;
 
-    document.getElementById('pad-badge').classList.remove('d-none');
-    document.getElementById('pad-status').innerText = '⚡ Bypassed';
-    document.getElementById('pad-status').className = 'text-warning fw-bold';
+  function emptySweep() {
+    return {
+      'far-left': null,
+      'left': null,
+      'front': null,
+      'right': null,
+      'far-right': null
+    };
+  }
 
-    const badge = document.getElementById('challenge-badge');
-    if (badge) {
-      badge.classList.remove('d-none');
-      badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-warning font-monospace small border border-warning';
-      document.getElementById('challenge-icon').innerText = '⚡';
-      document.getElementById('challenge-text').innerText = 'Challenge: Bypassed by Operator';
+  function resetSweep() {
+    sweepSamples = emptySweep();
+    pendingSector = null;
+    pendingStreak = 0;
+    frontalSnapshot = null;
+    diag.yaw = null;
+    diag.sector = null;
+    diag.pendingSector = null;
+    diag.pendingStreak = 0;
+    renderSweepChips();
+    renderDiagnostics();
+  }
+
+  function pushDiagEvent(message) {
+    const stamp = new Date().toLocaleTimeString();
+    diag.events.unshift(`[${stamp}] ${message}`);
+    if (diag.events.length > 8) diag.events.length = 8;
+    const el = document.getElementById('diag-event');
+    if (el) el.textContent = diag.events[0] || 'Waiting for camera…';
+  }
+
+  function clearDiagnostics() {
+    diag.events = [];
+    diag.match = {
+      status: 'idle',
+      padPassed: null,
+      padScore: null,
+      padMessage: null,
+      isFaceMatch: null,
+      verified: null,
+      distance: null,
+      matchScore: null,
+      threshold: 0.50,
+      message: null
+    };
+    const el = document.getElementById('diag-event');
+    if (el) el.textContent = 'Diagnostics cleared';
+    renderDiagnostics();
+  }
+
+  function fmt(value, digits = 2) {
+    if (value === null || value === undefined || Number.isNaN(value)) return '—';
+    if (typeof value === 'number') return value.toFixed(digits);
+    return String(value);
+  }
+
+  function renderDiagnostics() {
+    const earEl = document.getElementById('diag-ear');
+    const rotEl = document.getElementById('diag-rotation');
+    const matchEl = document.getElementById('diag-match');
+    if (!earEl || !rotEl || !matchEl) return;
+
+    const challengeLine = diag.challengeTarget
+      ? `${diag.challengeBlinks}/${diag.challengeTarget}`
+      : `${diag.challengeBlinks}/—`;
+
+    earEl.textContent = [
+      `EAR now     ${fmt(diag.ear)}  (L ${fmt(diag.leftEar)} / R ${fmt(diag.rightEar)})`,
+      `gap |L-R|   ${fmt(diag.earGap)}   width ${fmt(diag.widthRatio)} / iod ${fmt(diag.minWidthRatio)}`,
+      `baseline    ${fmt(diag.baseline)}   pitch ${fmt(diag.pitch, 3)} (base ${fmt(diag.pitchBaseline, 3)})`,
+      `close <     ${fmt(diag.closeThreshold)}   open >= ${fmt(diag.openThreshold)}`,
+      `gate        ${diag.eyeGate}`,
+      `eyes        ${diag.eyesClosed ? `CLOSED ${diag.closedMs}ms` : 'open'}`,
+      `valid min/max ${fmt(diag.minEar)} / ${fmt(diag.maxEar)}  Δ ${fmt(diag.earDelta)}`,
+      `blinks      ${diag.blinks}   challenge ${challengeLine}`,
+      diag.blinkReject ? `last reject ${diag.blinkReject}` : 'blink needs both eyes, stable pitch'
+    ].join('\n');
+
+    const sweepLines = SWEEP_SECTORS.map((sector) => {
+      const sample = sweepSamples[sector];
+      if (!sample) return `${sector.padEnd(9)} · missing`;
+      return `${sector.padEnd(9)} ✓ yaw ${fmt(sample.yaw, 3)}`;
+    });
+    rotEl.textContent = [
+      `yaw         ${diag.yaw === null ? '—' : fmt(diag.yaw, 3)}`,
+      `sector      ${diag.sector || '—'}`,
+      `pending     ${diag.pendingSector || '—'} ×${diag.pendingStreak}/2`,
+      `faces       ${diag.faces} detected / ${diag.accepted} in oval`,
+      `confidence  ${diag.confidence === null ? '—' : fmt(diag.confidence, 3)}`,
+      `oval gate   ${diag.ovalOk ? 'PASS' : 'fail'}`,
+      `loop        ${diag.fpsHint}  last ${diag.lastDetectMs || '—'}ms`,
+      '',
+      ...sweepLines
+    ].join('\n');
+
+    const m = diag.match;
+    matchEl.textContent = [
+      `status      ${m.status}`,
+      `PAD         ${m.padPassed === null ? '—' : (m.padPassed ? 'PASSED' : 'FAILED')}  score ${fmt(m.padScore, 1)}`,
+      `PAD note    ${m.padMessage || '—'}`,
+      `face match  ${m.isFaceMatch === null ? '—' : (m.isFaceMatch ? 'YES' : 'NO')}`,
+      `verified    ${m.verified === null ? '—' : (m.verified ? 'YES' : 'NO')}`,
+      `L2 dist     ${fmt(m.distance, 4)}  threshold ${fmt(m.threshold, 2)}`,
+      `confidence  ${m.matchScore === null ? '—' : fmt(m.matchScore, 1) + '%'}`,
+      `message     ${m.message || '—'}`
+    ].join('\n');
+  }
+
+  function captureVideoFrame() {
+    if (!video.videoWidth) return null;
+    const frame = document.createElement('canvas');
+    frame.width = video.videoWidth;
+    frame.height = video.videoHeight;
+    frame.getContext('2d').drawImage(video, 0, 0);
+    return frame.toDataURL('image/jpeg', 0.8);
+  }
+
+  function renderSweepChips() {
+    SWEEP_SECTORS.forEach((sector) => {
+      const el = document.getElementById('chip-' + sector);
+      if (!el) return;
+      if (sweepSamples[sector]) {
+        el.className = 'btn btn-success btn-sm disabled';
+        el.style.opacity = '1';
+      } else {
+        el.className = 'btn btn-outline-secondary btn-sm disabled';
+        el.style.opacity = '';
+      }
+    });
+  }
+
+  function isLiveCamera() {
+    return !video.classList.contains('d-none');
+  }
+
+  function isSweepComplete() {
+    return SWEEP_SECTORS.every((sector) => sweepSamples[sector]);
+  }
+
+  function liveSweepReady() {
+    return isLiveCamera() && isSweepComplete() && sweepSamples.front && sweepSamples.front.image;
+  }
+
+  function viewsPayload() {
+    if (!liveSweepReady()) return null;
+    return SWEEP_SECTORS.map((sector) => {
+      const sample = sweepSamples[sector];
+      return { sector: sample.sector, yaw: sample.yaw, image: sample.image };
+    });
+  }
+
+  function updateActionButtons() {
+    const live = isLiveCamera();
+    const photo = !previewImg.classList.contains('d-none');
+    let enabled = false;
+    if (live) {
+      enabled = faceCurrentlyAccepted && liveSweepReady();
+    } else if (photo) {
+      enabled = faceCurrentlyAccepted && !!currentImageBase64;
     }
-    document.getElementById('btn-capture-enroll').disabled = false;
-    document.getElementById('btn-capture-auth').disabled = false;
+    document.getElementById('btn-capture-enroll').disabled = !enabled;
+    document.getElementById('btn-capture-auth').disabled = !enabled;
+  }
+
+  function ovalMetrics(width, height) {
+    return {
+      cx: width / 2,
+      cy: height * 0.46,
+      rx: width * 0.22,
+      ry: height * 0.36
+    };
+  }
+
+  function drawOval(ctx, width, height, color) {
+    const { cx, cy, rx, ry } = ovalMetrics(width, height);
+    if (!(rx > 0) || !(ry > 0)) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.setLineDash([12, 8]);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function boxAccepted(resizedDet, width, height) {
+    const box = resizedDet && resizedDet.detection && resizedDet.detection.box;
+    if (!box) return false;
+    const { cx, cy, rx, ry } = ovalMetrics(width, height);
+    if (!(rx > 0) || !(ry > 0)) return false;
+    const fx = box.x + box.width / 2;
+    const fy = box.y + box.height / 2;
+    const inside = ((cx - fx) / rx) ** 2 + ((cy - fy) / ry) ** 2 <= 1;
+    const minW = 0.55 * rx * 2;
+    const maxW = 1.15 * rx * 2;
+    return inside && box.width >= minW && box.width <= maxW;
+  }
+
+  function estimateYaw(landmarks) {
+    const jaw = landmarks.getJawOutline();
+    const nose = landmarks.getNose();
+    const tip = nose[3] || nose[Math.floor(nose.length / 2)];
+    const imageLeft = jaw[0];
+    const imageRight = jaw[jaw.length - 1];
+    const leftDist = Math.hypot(tip.x - imageLeft.x, tip.y - imageLeft.y);
+    const rightDist = Math.hypot(tip.x - imageRight.x, tip.y - imageRight.y);
+    const span = leftDist + rightDist || 1;
+    // Image-left is the subject's right on an unmirrored camera.
+    // Negative yaw is the subject's own left, matching the Far left chip.
+    const yaw = (rightDist - leftDist) / span;
+    return Math.max(-1.2, Math.min(1.2, yaw));
+  }
+
+  function sectorForYaw(yaw) {
+    if (yaw <= -0.42) return 'far-left';
+    if (yaw <= -0.16) return 'left';
+    if (yaw < 0.16) return 'front';
+    if (yaw < 0.42) return 'right';
+    return 'far-right';
+  }
+
+  function sectorLabel(sector) {
+    return SECTOR_LABELS[sector] || sector;
+  }
+
+  function commitSector(sector, yaw) {
+    if (pendingSector === sector) pendingStreak += 1;
+    else {
+      pendingSector = sector;
+      pendingStreak = 1;
+    }
+    if (pendingStreak < 2) return;
+
+    const image = captureVideoFrame();
+    if (!image) return;
+    const sample = { sector, yaw, image };
+    const existing = sweepSamples[sector];
+    let wroteFront = false;
+    let wroteNew = false;
+    if (!existing) {
+      sweepSamples[sector] = sample;
+      wroteFront = sector === 'front';
+      wroteNew = true;
+    } else if (sector === 'far-left' && yaw < existing.yaw) {
+      sweepSamples[sector] = sample;
+      wroteNew = true;
+    } else if (sector === 'far-right' && yaw > existing.yaw) {
+      sweepSamples[sector] = sample;
+      wroteNew = true;
+    } else if (sector === 'front' && Math.abs(yaw) < Math.abs(existing.yaw)) {
+      sweepSamples[sector] = sample;
+      wroteFront = true;
+      wroteNew = true;
+    }
+    if (wroteFront) frontalSnapshot = sample.image;
+    if (wroteNew) pushDiagEvent(`Sweep ${sector} @ yaw ${yaw.toFixed(3)}`);
+    renderSweepChips();
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function setMirrorForLive(live) {
+    if (live) {
+      overlay.style.transform = 'scaleX(-1)';
+      overlay.style.objectFit = 'cover';
+    } else {
+      overlay.style.transform = 'none';
+      overlay.style.objectFit = 'contain';
+    }
   }
 
   async function initUIN() {
@@ -220,86 +584,520 @@
 
   async function fetchLivenessChallenge() {
     try {
-      const res = await fetch('/api/liveness/challenge', { method: 'POST' });
+      const res = await fetch('/api/sweep/challenge', { method: 'POST' });
       if (res.ok) {
         activeChallenge = await res.json();
         challengeBlinks = 0;
+        diag.challengeBlinks = 0;
+        diag.challengeTarget = 0;
         const badge = document.getElementById('challenge-badge');
         badge.classList.remove('d-none');
         badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-warning font-monospace small border border-warning';
         document.getElementById('challenge-icon').innerText = '🎯';
-        document.getElementById('challenge-text').innerText = `Challenge: Blink ${activeChallenge.targetBlinks} times (0/${activeChallenge.targetBlinks})`;
+        document.getElementById('challenge-text').innerText = activeChallenge.prompt;
+        pushDiagEvent(`Sweep challenge ${activeChallenge.timeLimitSeconds}s`);
+        renderDiagnostics();
       }
     } catch (e) {
-      console.warn('Could not fetch liveness challenge:', e);
+      console.warn('Could not fetch sweep challenge:', e);
+      pushDiagEvent('Sweep challenge fetch failed');
     }
   }
 
   initUIN();
 
   async function loadModels() {
-    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-    try {
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-      await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-      modelsLoaded = true;
-      document.getElementById('cam-status').innerText = 'Ready. Open Webcam or Upload Photo.';
-    } catch (err) {
-      document.getElementById('cam-status').innerText = 'Model Load Error: ' + err.message;
+    if (modelsLoaded) return;
+    if (modelsLoading) return modelsLoading;
+
+    modelsLoading = (async () => {
+      // Pin model weights to the same package version as the script above.
+      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/';
+      document.getElementById('cam-status').innerText = 'Loading face models...';
+      try {
+        if (typeof faceapi === 'undefined') {
+          throw new Error('face-api.js failed to load from CDN');
+        }
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        ]);
+        modelsLoaded = true;
+        document.getElementById('cam-status').innerText = 'Ready. Open Webcam or Upload Photo.';
+        pushDiagEvent('Face-api models loaded');
+        renderDiagnostics();
+      } catch (err) {
+        modelsLoaded = false;
+        document.getElementById('cam-status').innerText = 'Model Load Error: ' + err.message;
+        pushDiagEvent('Model load error: ' + err.message);
+        renderDiagnostics();
+        throw err;
+      } finally {
+        modelsLoading = null;
+      }
+    })();
+
+    return modelsLoading;
+  }
+
+  function pointDist(p1, p2) {
+    return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+  }
+
+  function centroid(points) {
+    let x = 0;
+    let y = 0;
+    for (const point of points) {
+      x += point.x;
+      y += point.y;
     }
+    const n = points.length || 1;
+    return { x: x / n, y: y / n };
   }
 
   function calculateEAR(eyeLandmarks) {
-    function dist(p1, p2) {
-      return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-    }
-    const v1 = dist(eyeLandmarks[1], eyeLandmarks[5]);
-    const v2 = dist(eyeLandmarks[2], eyeLandmarks[4]);
-    const h = dist(eyeLandmarks[0], eyeLandmarks[3]);
+    const v1 = pointDist(eyeLandmarks[1], eyeLandmarks[5]);
+    const v2 = pointDist(eyeLandmarks[2], eyeLandmarks[4]);
+    const h = pointDist(eyeLandmarks[0], eyeLandmarks[3]);
     if (h === 0) return 0.0;
     return (v1 + v2) / (2.0 * h);
+  }
+
+  function measureEyes(landmarks) {
+    const leftPts = landmarks.getLeftEye();
+    const rightPts = landmarks.getRightEye();
+    const nose = landmarks.getNose();
+    const jaw = landmarks.getJawOutline();
+    const left = {
+      ear: calculateEAR(leftPts),
+      width: pointDist(leftPts[0], leftPts[3]),
+      center: centroid(leftPts)
+    };
+    const right = {
+      ear: calculateEAR(rightPts),
+      width: pointDist(rightPts[0], rightPts[3]),
+      center: centroid(rightPts)
+    };
+    const eyeMid = {
+      x: (left.center.x + right.center.x) / 2,
+      y: (left.center.y + right.center.y) / 2
+    };
+    const noseTip = nose[Math.floor(nose.length / 2)] || nose[0];
+    const chin = jaw[8] || jaw[jaw.length - 1];
+    const faceH = Math.max(1, pointDist(eyeMid, chin));
+    const iod = Math.max(1, pointDist(left.center, right.center));
+    const narrower = Math.min(left.width, right.width);
+    return {
+      leftEar: left.ear,
+      rightEar: right.ear,
+      avgEar: (left.ear + right.ear) / 2,
+      earGap: Math.abs(left.ear - right.ear),
+      widthRatio: narrower / Math.max(left.width, right.width, 0.001),
+      minWidthRatio: narrower / iod,
+      // Nose dropping below the eye line means the head/gaze went down.
+      pitch: (noseTip.y - eyeMid.y) / faceH,
+      yaw: estimateYaw(landmarks)
+    };
+  }
+
+  function eyeVisibility(sample) {
+    // A blink keeps both eyes present and similar. Looking down or losing an
+    // eye makes one contour collapse (EAR ~0.19 vs ~0.63) or both widths vanish.
+    if (sample.earGap > 0.12) return 'asymmetric eyes';
+    if (sample.widthRatio < 0.65) return 'one eye collapsed';
+    if (sample.minWidthRatio < 0.18) return 'eyes not visible';
+    if (Math.abs(sample.yaw) > 0.34) return 'head turned too far';
+    return null;
+  }
+
+  async function skipBlinkCheck() {
+    isBypassed = true;
+    setBlinkStatus('⚡ Bypassed', 'text-warning fw-bold');
+    const badge = document.getElementById('challenge-badge');
+    if (badge) {
+      badge.classList.remove('d-none');
+      badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-warning font-monospace small border border-warning';
+      document.getElementById('challenge-icon').innerText = '⚡';
+      document.getElementById('challenge-text').innerText = 'Blink override recorded. Finish the head sweep.';
+    }
+    pushDiagEvent('Blink override recorded. Head sweep still required.');
+    try {
+      await fetch('/api/checkLiveness', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeId: activeChallenge ? activeChallenge.challengeId : null,
+          blinkCount: blinkCount,
+          minEar: minEarObserved,
+          maxEar: maxEarObserved,
+          durationMs: Math.max(0, Date.now() - livenessStartTime),
+          bypassLiveness: true
+        })
+      });
+    } catch (e) {
+      console.warn('Bypass liveness notification failed:', e);
+    }
+  }
+
+  function resetBlinkTracking() {
+    blinkCount = 0;
+    isBypassed = false;
+    challengeBlinks = 0;
+    minEarObserved = 1.0;
+    maxEarObserved = 0.0;
+    earBaseline = 0.0;
+    pitchBaseline = 0.0;
+    eyesClosed = false;
+    eyesClosedSince = 0;
+    closePitch = 0.0;
+    closeYaw = 0.0;
+    lastBlinkTime = 0;
+    livenessStartTime = Date.now();
+    diag.ear = 0;
+    diag.leftEar = 0;
+    diag.rightEar = 0;
+    diag.baseline = 0;
+    diag.closeThreshold = 0;
+    diag.openThreshold = 0;
+    diag.absoluteClose = false;
+    diag.eyesClosed = false;
+    diag.closedMs = 0;
+    diag.earGap = 0;
+    diag.widthRatio = 0;
+    diag.minWidthRatio = 0;
+    diag.pitch = null;
+    diag.pitchBaseline = 0;
+    diag.eyeGate = '—';
+    diag.blinkReject = '';
+    diag.blinks = 0;
+    diag.challengeBlinks = 0;
+    diag.minEar = 1;
+    diag.maxEar = 0;
+    diag.earDelta = 0;
+    renderDiagnostics();
+  }
+
+  function setBlinkStatus(text, className) {
+    if (isBypassed && text !== '⚡ Bypassed') return;
+    document.getElementById('pad-status').innerText = text;
+    document.getElementById('pad-status').className = className;
+  }
+
+  function registerBlink() {
+    const now = Date.now();
+    if (now - lastBlinkTime < 280) return;
+    lastBlinkTime = now;
+    blinkCount += 1;
+    if (activeChallenge) {
+      challengeBlinks += 1;
+      const badge = document.getElementById('challenge-badge');
+      if (challengeBlinks >= activeChallenge.targetBlinks) {
+        badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-success font-monospace small border border-success';
+        document.getElementById('challenge-icon').innerText = '✅';
+        document.getElementById('challenge-text').innerText =
+          `Challenge Verified (${challengeBlinks}/${activeChallenge.targetBlinks} blinks)`;
+      } else {
+        document.getElementById('challenge-text').innerText =
+          `Challenge: Blink ${activeChallenge.targetBlinks} times (${challengeBlinks}/${activeChallenge.targetBlinks})`;
+      }
+    }
+    setBlinkStatus(`👁️ Blink Detected! (${blinkCount})`, 'text-success fw-bold');
+    diag.blinks = blinkCount;
+    diag.challengeBlinks = challengeBlinks;
+    diag.challengeTarget = activeChallenge ? activeChallenge.targetBlinks : 0;
+    diag.blinkReject = '';
+    pushDiagEvent(`Blink #${blinkCount} counted`);
+    renderDiagnostics();
+  }
+
+  function publishEyeDiag(sample, extra) {
+    diag.ear = sample.avgEar;
+    diag.leftEar = sample.leftEar;
+    diag.rightEar = sample.rightEar;
+    diag.earGap = sample.earGap;
+    diag.widthRatio = sample.widthRatio;
+    diag.minWidthRatio = sample.minWidthRatio;
+    diag.pitch = sample.pitch;
+    diag.pitchBaseline = pitchBaseline;
+    diag.baseline = earBaseline;
+    diag.eyesClosed = eyesClosed;
+    diag.closedMs = eyesClosed ? Date.now() - eyesClosedSince : 0;
+    diag.blinks = blinkCount;
+    diag.challengeBlinks = challengeBlinks;
+    diag.challengeTarget = activeChallenge ? activeChallenge.targetBlinks : 0;
+    diag.minEar = minEarObserved === 1.0 && maxEarObserved === 0.0 ? null : minEarObserved;
+    diag.maxEar = maxEarObserved === 0.0 ? null : maxEarObserved;
+    diag.earDelta = (diag.minEar === null || diag.maxEar === null) ? 0 : maxEarObserved - minEarObserved;
+    Object.assign(diag, extra);
+    renderDiagnostics();
+  }
+
+  function updateBlink(landmarks) {
+    const sample = measureEyes(landmarks);
+    const now = Date.now();
+    const reject = eyeVisibility(sample);
+    document.getElementById('ear-val').innerText = sample.avgEar.toFixed(2);
+
+    // Looking down / a lost eye must not move the open-eye baseline or PAD min/max.
+    if (reject) {
+      const reasonChanged = diag.blinkReject !== reject;
+      if (eyesClosed) {
+        eyesClosed = false;
+        diag.blinkReject = reject;
+        pushDiagEvent(`Blink cancelled: ${reject}`);
+      } else if (reasonChanged) {
+        diag.blinkReject = reject;
+        pushDiagEvent(`Eyes ignored: ${reject}`);
+      }
+      setBlinkStatus(reject, 'text-warning');
+      publishEyeDiag(sample, { eyeGate: 'reject · ' + reject, closeThreshold: diag.closeThreshold, openThreshold: diag.openThreshold });
+      return;
+    }
+
+    if (!eyesClosed) {
+      if (earBaseline === 0.0) {
+        earBaseline = sample.avgEar;
+        pitchBaseline = sample.pitch;
+      } else {
+        earBaseline = earBaseline * 0.85 + sample.avgEar * 0.15;
+        pitchBaseline = pitchBaseline * 0.9 + sample.pitch * 0.1;
+      }
+    }
+
+    const closeThreshold = Math.max(0.12, Math.min(0.24, earBaseline * 0.72));
+    const openThreshold = closeThreshold + 0.04;
+    const bothClosed = sample.leftEar < closeThreshold && sample.rightEar < closeThreshold;
+    const bothOpen = sample.leftEar >= openThreshold && sample.rightEar >= openThreshold;
+    const pitchDrift = Math.abs(sample.pitch - (eyesClosed ? closePitch : pitchBaseline));
+
+    if (!eyesClosed && bothClosed) {
+      if (pitchDrift > 0.06) {
+        diag.blinkReject = 'pitch changed (look down)';
+        setBlinkStatus('Look-down ignored', 'text-warning');
+        pushDiagEvent(`Look-down ignored (pitch Δ ${pitchDrift.toFixed(3)})`);
+        publishEyeDiag(sample, { eyeGate: 'reject · pitch', closeThreshold, openThreshold });
+        return;
+      }
+      eyesClosed = true;
+      eyesClosedSince = now;
+      closePitch = sample.pitch;
+      closeYaw = sample.yaw;
+      diag.blinkReject = '';
+      setBlinkStatus('Eyes closing…', 'text-warning');
+      pushDiagEvent(`Eyes closing (L ${sample.leftEar.toFixed(2)} / R ${sample.rightEar.toFixed(2)})`);
+    } else if (eyesClosed) {
+      minEarObserved = Math.min(minEarObserved, sample.leftEar, sample.rightEar);
+      const yawDrift = Math.abs(sample.yaw - closeYaw);
+      if (pitchDrift > 0.06 || yawDrift > 0.12) {
+        eyesClosed = false;
+        const why = pitchDrift > 0.06 ? 'pitch changed (look down)' : 'head moved';
+        diag.blinkReject = why;
+        setBlinkStatus('Look-down ignored', 'text-warning');
+        pushDiagEvent(`Blink cancelled: ${why}`);
+      } else if (bothOpen) {
+        const closedMs = now - eyesClosedSince;
+        eyesClosed = false;
+        maxEarObserved = Math.max(maxEarObserved, sample.avgEar, earBaseline);
+        if (closedMs >= 40 && closedMs <= 700) {
+          registerBlink();
+        } else {
+          diag.blinkReject = `duration ${closedMs}ms`;
+          pushDiagEvent(`Close ignored (${closedMs}ms, need 40–700ms)`);
+          setBlinkStatus(blinkCount > 0 ? '✅ Live Motion OK' : 'Blink Eyes to Verify', blinkCount > 0 ? 'text-success fw-semibold' : 'text-info');
+        }
+      }
+    } else {
+      minEarObserved = Math.min(minEarObserved, sample.avgEar);
+      maxEarObserved = Math.max(maxEarObserved, sample.avgEar);
+      setBlinkStatus(
+        blinkCount > 0 ? '✅ Live Motion OK' : 'Blink Eyes to Verify',
+        blinkCount > 0 ? 'text-success fw-semibold' : 'text-info'
+      );
+    }
+
+    publishEyeDiag(sample, {
+      eyeGate: eyesClosed ? 'closing · both eyes' : 'open · both eyes',
+      closeThreshold,
+      openThreshold
+    });
+  }
+
+  async function analyzeSource(input, { live, generation }) {
+    const width = overlay.width;
+    const height = overlay.height;
+    let stroke = '#ffc107';
+    let drawList = [];
+    const startedAt = performance.now();
+
+    try {
+      if (!modelsLoaded) {
+        document.getElementById('cam-status').innerText = 'Face models not ready';
+        return;
+      }
+      // Skip descriptors on the live path — they are unused and cost a lot of
+      // frames, which makes short blinks easy to miss between samples.
+      const rawList = await faceapi
+        .detectAllFaces(input, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+        .withFaceLandmarks();
+      if (generation !== frameGeneration) return;
+
+      const resized = faceapi.resizeResults(rawList, { width, height });
+      const accepted = [];
+      for (let i = 0; i < resized.length; i++) {
+        if (boxAccepted(resized[i], width, height)) {
+          accepted.push({ raw: rawList[i], resized: resized[i] });
+        }
+      }
+
+      const now = performance.now();
+      diag.lastDetectMs = Math.round(now - startedAt);
+      if (diagLastFrameAt) {
+        const dt = now - diagLastFrameAt;
+        diag.fpsHint = dt > 0 ? `${(1000 / dt).toFixed(1)} fps` : '—';
+      }
+      diagLastFrameAt = now;
+      diag.faces = rawList.length;
+      diag.accepted = accepted.length;
+      diag.confidence = rawList[0] && rawList[0].detection
+        ? rawList[0].detection.score
+        : null;
+      diag.ovalOk = accepted.length === 1;
+      diag.pendingSector = pendingSector;
+      diag.pendingStreak = pendingStreak;
+
+      // EAR tracks any detected face so the badge moves even before oval accept.
+      if (live && rawList.length > 0 && rawList[0].landmarks) {
+        updateBlink(rawList[0].landmarks);
+      } else if (live && rawList.length === 0) {
+        document.getElementById('ear-val').innerText = '0.00';
+        document.getElementById('pad-status').innerText = 'No face detected';
+        document.getElementById('pad-status').className = 'text-warning';
+        diag.ear = 0;
+        diag.eyesClosed = false;
+        renderDiagnostics();
+      }
+
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+
+      if (accepted.length === 1) {
+        stroke = '#198754';
+        drawList = [accepted[0].resized];
+        faceCurrentlyAccepted = true;
+        if (live) {
+          const yaw = estimateYaw(accepted[0].raw.landmarks);
+          const sector = sectorForYaw(yaw);
+          commitSector(sector, yaw);
+          diag.yaw = yaw;
+          diag.sector = sector;
+          diag.pendingSector = pendingSector;
+          diag.pendingStreak = pendingStreak;
+          document.getElementById('cam-status').innerText = 'Face in oval · ' + sectorLabel(sector);
+        } else {
+          document.getElementById('cam-status').innerText = 'Face in oval · still photo, no head sweep';
+        }
+      } else if (accepted.length > 1) {
+        stroke = '#dc3545';
+        drawList = accepted.map((item) => item.resized);
+        faceCurrentlyAccepted = false;
+        pendingSector = null;
+        pendingStreak = 0;
+        diag.pendingSector = null;
+        diag.pendingStreak = 0;
+        document.getElementById('cam-status').innerText = 'Only one face inside the oval';
+      } else if (rawList.length > 0) {
+        stroke = '#ffc107';
+        drawList = resized.slice(0, 1);
+        faceCurrentlyAccepted = false;
+        pendingSector = null;
+        pendingStreak = 0;
+        // Still show yaw outside oval so rotation diagnostics stay useful.
+        if (live && rawList[0].landmarks) {
+          const yaw = estimateYaw(rawList[0].landmarks);
+          diag.yaw = yaw;
+          diag.sector = sectorForYaw(yaw);
+        }
+        diag.pendingSector = null;
+        diag.pendingStreak = 0;
+        document.getElementById('cam-status').innerText = 'Face detected — move closer and center in the oval';
+      } else {
+        stroke = '#ffc107';
+        faceCurrentlyAccepted = false;
+        pendingSector = null;
+        pendingStreak = 0;
+        diag.yaw = null;
+        diag.sector = null;
+        diag.pendingSector = null;
+        diag.pendingStreak = 0;
+        document.getElementById('cam-status').innerText = 'No face detected — check lighting / camera';
+      }
+
+      if (drawList.length) faceapi.draw.drawDetections(overlay, drawList);
+      drawOval(overlay.getContext('2d'), width, height, stroke);
+      updateActionButtons();
+      renderDiagnostics();
+    } catch (err) {
+      if (generation !== frameGeneration) return;
+      console.warn('Face detection failed', err);
+      faceCurrentlyAccepted = false;
+      pendingSector = null;
+      pendingStreak = 0;
+      document.getElementById('cam-status').innerText = 'Face detection error: ' + (err && err.message ? err.message : err);
+      pushDiagEvent('Detect error: ' + (err && err.message ? err.message : err));
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+      drawOval(ctx, width, height, '#ffc107');
+      updateActionButtons();
+      renderDiagnostics();
+    }
   }
 
   async function handleFileUpload(e) {
     if (!modelsLoaded) await loadModels();
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async function(evt) {
+    reader.onload = function(evt) {
+      frameGeneration += 1;
+      const generation = frameGeneration;
+      if (faceTimer) {
+        clearInterval(faceTimer);
+        faceTimer = null;
+      }
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach((track) => track.stop());
+        video.srcObject = null;
+      }
+      resetSweep();
+      faceCurrentlyAccepted = false;
       currentImageBase64 = evt.target.result;
+      setMirrorForLive(false);
+      updateActionButtons();
+      document.getElementById('challenge-badge').classList.add('d-none');
+
+      let photoScanStarted = false;
+      const scanPhoto = async () => {
+        if (photoScanStarted) return;
+        photoScanStarted = true;
+        if (generation !== frameGeneration) return;
+        overlay.width = previewImg.naturalWidth || previewImg.width;
+        overlay.height = previewImg.naturalHeight || previewImg.height;
+        document.getElementById('cam-status').innerText = 'Scanning facial landmarks in photo...';
+        await analyzeSource(previewImg, { live: false, generation });
+      };
+
+      previewImg.onload = scanPhoto;
       previewImg.src = currentImageBase64;
       previewImg.classList.remove('d-none');
       video.classList.add('d-none');
       placeholder.classList.add('d-none');
       document.getElementById('pad-badge').classList.remove('d-none');
       document.getElementById('pad-status').innerText = 'Static File';
-
-      previewImg.onload = async () => {
-        overlay.width = previewImg.width;
-        overlay.height = previewImg.height;
-        document.getElementById('cam-status').innerText = 'Scanning facial landmarks in photo...';
-        const detection = await faceapi.detectSingleFace(previewImg).withFaceLandmarks().withFaceDescriptor();
-
-        const ctx = overlay.getContext('2d');
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-        if (detection) {
-          currentDescriptor = Array.from(detection.descriptor);
-          const displaySize = { width: overlay.width, height: overlay.height };
-          faceapi.matchDimensions(overlay, displaySize);
-          const resized = faceapi.resizeResults(detection, displaySize);
-          faceapi.draw.drawDetections(overlay, resized);
-          document.getElementById('cam-status').innerText = '✓ Face Detected (ISO 19794-5 Compliant)';
-          document.getElementById('btn-capture-enroll').disabled = false;
-          document.getElementById('btn-capture-auth').disabled = false;
-        } else {
-          currentDescriptor = null;
-          document.getElementById('cam-status').innerText = '❌ No face found in photo!';
-          alert('No face detected in this photo! Please upload a clear portrait selfie.');
-        }
-      };
+      document.getElementById('pad-status').className = 'text-info';
+      if (previewImg.complete && previewImg.naturalWidth) scanPhoto();
     };
     reader.readAsDataURL(file);
   }
@@ -312,90 +1110,57 @@
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+      frameGeneration += 1;
+      const generation = frameGeneration;
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach((track) => track.stop());
+      }
+      resetSweep();
+      currentImageBase64 = null;
+      faceCurrentlyAccepted = false;
+      setMirrorForLive(true);
+      updateActionButtons();
+
       video.srcObject = stream;
       video.classList.remove('d-none');
       previewImg.classList.add('d-none');
       placeholder.classList.add('d-none');
       document.getElementById('pad-badge').classList.remove('d-none');
+      document.getElementById('cam-status').innerText = 'Fit your face inside the oval';
 
       video.onloadedmetadata = () => {
+        if (generation !== frameGeneration) return;
         overlay.width = video.videoWidth;
         overlay.height = video.videoHeight;
-        blinkCount = 0;
-        challengeBlinks = 0;
-        minEarObserved = 1.0;
-        maxEarObserved = 0.0;
-        isBypassed = false;
-        livenessStartTime = Date.now();
+        resetBlinkTracking();
         fetchLivenessChallenge();
-        trackFace();
+        trackFace(generation);
       };
-      document.getElementById('btn-capture-enroll').disabled = false;
-      document.getElementById('btn-capture-auth').disabled = false;
-      document.getElementById('cam-status').innerText = 'Live Feed Active';
     } catch (e) {
       alert('Webcam permission error: ' + e.message + '. Please use the "Upload Photo" button instead!');
     }
   }
 
-  async function trackFace() {
+  function trackFace(generation) {
+    if (faceTimer) clearInterval(faceTimer);
     const displaySize = { width: overlay.width, height: overlay.height };
     faceapi.matchDimensions(overlay, displaySize);
 
-    setInterval(async () => {
-      if (!video.classList.contains('d-none') && !video.paused && !video.ended) {
-        const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
-        const ctx = overlay.getContext('2d');
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-        if (detection) {
-          currentDescriptor = Array.from(detection.descriptor);
-          const resized = faceapi.resizeResults(detection, displaySize);
-          faceapi.draw.drawDetections(overlay, resized);
-
-          const landmarks = detection.landmarks;
-          const leftEye = landmarks.getLeftEye();
-          const rightEye = landmarks.getRightEye();
-          const avgEar = (calculateEAR(leftEye) + calculateEAR(rightEye)) / 2.0;
-
-          document.getElementById('ear-val').innerText = avgEar.toFixed(2);
-          minEarObserved = Math.min(minEarObserved, avgEar);
-          maxEarObserved = Math.max(maxEarObserved, avgEar);
-
-          if (isBypassed) {
-            document.getElementById('pad-status').innerText = '⚡ Bypassed';
-            document.getElementById('pad-status').className = 'text-warning fw-bold';
-          } else if (avgEar < 0.25 && Date.now() - lastBlinkTime > 350) {
-            lastBlinkTime = Date.now();
-            blinkCount++;
-            if (activeChallenge) {
-              challengeBlinks++;
-              const badge = document.getElementById('challenge-badge');
-              if (challengeBlinks >= activeChallenge.targetBlinks) {
-                badge.className = 'position-absolute bottom-0 start-0 m-3 px-3 py-2 rounded bg-black bg-opacity-80 text-success font-monospace small border border-success';
-                document.getElementById('challenge-icon').innerText = '✅';
-                document.getElementById('challenge-text').innerText = `Challenge Verified (${challengeBlinks}/${activeChallenge.targetBlinks} blinks)`;
-              } else {
-                document.getElementById('challenge-text').innerText = `Challenge: Blink ${activeChallenge.targetBlinks} times (${challengeBlinks}/${activeChallenge.targetBlinks})`;
-              }
-            }
-            document.getElementById('pad-status').innerText = '👁️ Blink Detected!';
-            document.getElementById('pad-status').className = 'text-success fw-bold';
-          } else if (blinkCount > 0) {
-            document.getElementById('pad-status').innerText = '✅ Live Motion OK';
-            document.getElementById('pad-status').className = 'text-success fw-semibold';
-          } else {
-            document.getElementById('pad-status').innerText = 'Blink Eyes to Verify';
-            document.getElementById('pad-status').className = 'text-info';
-          }
-
-          document.getElementById('cam-status').innerText = 'Face Detected (ISO 19794-5 Compliant)';
-        } else {
-          currentDescriptor = null;
-          document.getElementById('cam-status').innerText = 'Searching for face...';
-        }
+    faceTimer = setInterval(async () => {
+      if (generation !== frameGeneration) {
+        clearInterval(faceTimer);
+        faceTimer = null;
+        return;
       }
-    }, 120);
+      if (video.classList.contains('d-none') || video.paused || video.ended) return;
+      if (detecting) return;
+      detecting = true;
+      try {
+        await analyzeSource(video, { live: true, generation });
+      } finally {
+        detecting = false;
+      }
+    }, 80);
   }
 
   function switchTab(tab) {
@@ -436,22 +1201,22 @@
   }
 
   async function captureAndEnroll() {
-    if (!currentDescriptor) {
+    const faceViews = isLiveCamera() ? viewsPayload() : null;
+    if (!faceCurrentlyAccepted || (!isLiveCamera() && !currentImageBase64)) {
       alert('No face detected! Please look at the camera or upload a clear photo.');
+      return;
+    }
+    if (isLiveCamera() && !faceViews) {
+      alert('Finish the head sweep before enrolling.');
       return;
     }
     const uin = document.getElementById('in-uin').value;
     const name = document.getElementById('in-name').value || 'Akraradet';
     const email = document.getElementById('in-email').value || 'citizen@ait.asia';
-    const password = document.getElementById('in-password').value || 'CitizenPass123!';
 
     let faceImage = currentImageBase64;
-    if (!video.classList.contains('d-none')) {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext('2d').drawImage(video, 0, 0);
-      faceImage = canvas.toDataURL('image/jpeg', 0.8);
+    if (isLiveCamera()) {
+      faceImage = frontalSnapshot || (sweepSamples.front && sweepSamples.front.image) || captureVideoFrame();
     }
 
     const resDiv = document.getElementById('enroll-result');
@@ -459,28 +1224,42 @@
     resDiv.className = 'alert alert-info small mt-2';
     resDiv.innerHTML = '<span>Saving citizen record and serializing ISO 19794-5 CBEFF XML...</span>';
 
+    const enrollPayload = {
+      uin: uin,
+      fullName: name,
+      email: email,
+      faceImage: faceImage || ''
+    };
+    if (faceViews) enrollPayload.faceViews = faceViews;
+
     try {
       const res = await fetch('/api/enroll', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uin: uin,
-          fullName: name,
-          email: email,
-          password: password,
-          faceImage: faceImage || '',
-          faceEmbedding: currentDescriptor
-        })
+        body: JSON.stringify(enrollPayload)
       });
       const data = await res.json();
 
       if (res.ok && data.status === 'SUCCESS') {
+        enrolledCredentialUin = uin;
+        diag.match.status = 'enrolled';
+        diag.match.message = `Templates stored for ${uin}` + (faceViews ? ` (${faceViews.length} views)` : ' (front only)');
+        pushDiagEvent(`Enroll OK ${uin}`);
+        renderDiagnostics();
         resDiv.className = 'alert alert-success small mt-2';
         resDiv.innerHTML = `
           <div class="fw-bold mb-1">🎉 ENROLLMENT COMPLETE!</div>
-          <div>UIN: <span class="font-monospace fw-bold">${uin}</span></div>
-          <div>Backend: <span class="font-monospace text-primary">${data.backend.toUpperCase()}</span> | CBEFF XML: <span class="badge bg-success">ISO 19785-3 Generated</span></div>
+          <div>UIN: <span class="font-monospace fw-bold">${escapeHtml(uin)}</span></div>
+          <div>Backend: <span class="font-monospace text-primary">${escapeHtml(String(data.backend || '').toUpperCase())}</span> | CBEFF XML: <span class="badge bg-success">ISO 19785-3 Generated</span></div>
           <div class="mt-2 text-muted">You can now switch to the <b>"1:1 Authentication"</b> tab and verify your face!</div>
+          <div class="mt-3 pt-3 border-top">
+            <div class="fw-bold mb-1">Create login</div>
+            <p class="text-muted mb-2">Your identity is already saved. This step only creates the Keycloak login.</p>
+            <input id="in-login-password" type="password" placeholder="At least 8 characters" class="form-control font-monospace" autocomplete="new-password">
+            <div id="login-error" class="text-danger mt-1 d-none"></div>
+            <button type="button" id="btn-create-login" onclick="createLogin()" class="btn btn-primary btn-sm fw-semibold mt-2">Create login</button>
+            <div id="login-status" class="mt-2"></div>
+          </div>
         `;
         initUIN();
       } else {
@@ -493,129 +1272,143 @@
     }
   }
 
+  async function createLogin() {
+    const errorEl = document.getElementById('login-error');
+    const statusEl = document.getElementById('login-status');
+    const passwordEl = document.getElementById('in-login-password');
+    const password = passwordEl ? passwordEl.value : '';
+    if (!password || password.length < 8) {
+      if (errorEl) {
+        errorEl.textContent = 'Enter a password of at least 8 characters.';
+        errorEl.classList.remove('d-none');
+      }
+      return;
+    }
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.classList.add('d-none');
+    }
+    if (!enrolledCredentialUin) {
+      if (errorEl) {
+        errorEl.textContent = 'Enroll an identity before creating a login.';
+        errorEl.classList.remove('d-none');
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uin: enrolledCredentialUin,
+          password: password
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (statusEl) {
+          statusEl.innerHTML = `<div class="text-danger">❌ ${escapeHtml(data.detail || data.message || 'Could not create login')}</div>`;
+        }
+        return;
+      }
+      if (statusEl) {
+        statusEl.innerHTML = `<div>keycloakProvisioned: <span class="font-monospace fw-bold">${escapeHtml(String(data.keycloakProvisioned))}</span></div>`;
+      }
+    } catch (e) {
+      if (statusEl) {
+        statusEl.innerHTML = `<div class="text-danger">❌ Network Error: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+  }
+
   async function captureAndAuthenticate() {
-    if (!currentDescriptor) {
-      alert('No face detected! Please look at the camera or upload a photo.');
+    const liveViews = isLiveCamera() ? viewsPayload() : null;
+    if (!isLiveCamera()) {
+      alert('Verification needs a live five-pose head sweep.');
+      return;
+    }
+    if (!faceCurrentlyAccepted || !liveViews) {
+      alert('Finish the head sweep before verifying.');
+      return;
+    }
+    if (!activeChallenge || !activeChallenge.challengeId) {
+      alert('The sweep challenge is missing. Open the camera again.');
       return;
     }
     const uin = document.getElementById('sel-uin').value;
     const resDiv = document.getElementById('auth-result');
     resDiv.classList.remove('d-none');
-    resDiv.innerHTML = '<div class="alert alert-info small">Executing IBioApi.checkLiveness() & IBioApi.match()...</div>';
+    resDiv.innerHTML = '<div class="alert alert-info small">Checking the five-pose sweep…</div>';
 
-    const durationMs = Date.now() - livenessStartTime;
-    const isFileMode = !previewImg.classList.contains('d-none');
+    diag.match.status = 'checking';
+    diag.match.message = null;
+    renderDiagnostics();
 
-    let padPassed = false;
-    let padScore = 15.0;
-    let padMessage = "";
-
-    if (isFileMode) {
-      padPassed = true;
-      padScore = 88.0;
-      padMessage = "Static Portrait Evaluation (Photo Test Mode)";
-    } else if (isBypassed) {
-      padPassed = true;
-      padScore = 95.0;
-      padMessage = "Human liveness verified (Manual Operator/Test Override).";
-      try {
-        await fetch('/api/checkLiveness', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            challengeId: activeChallenge ? activeChallenge.challengeId : null,
-            blinkCount: blinkCount,
-            minEar: minEarObserved,
-            maxEar: maxEarObserved,
-            durationMs: durationMs,
-            bypassLiveness: true
-          })
-        });
-      } catch (e) {
-        console.warn('Bypass liveness notification failed:', e);
-      }
-    } else {
-      try {
-        const livenessRes = await fetch('/api/checkLiveness', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            challengeId: activeChallenge ? activeChallenge.challengeId : null,
-            blinkCount: blinkCount,
-            minEar: minEarObserved,
-            maxEar: maxEarObserved,
-            durationMs: durationMs,
-            bypassLiveness: false
-          })
-        });
-        const livenessData = await livenessRes.json();
-        padPassed = livenessData.status === 'PASSED';
-        padScore = livenessData.livenessScore;
-        padMessage = livenessData.message;
-      } catch (e) {
-        console.warn('Liveness check error:', e);
-      }
-    }
+    const authPayload = {
+      uin: uin,
+      livenessScore: 0,
+      livenessPassed: false,
+      challengeId: activeChallenge.challengeId,
+      liveViews: liveViews
+    };
+    const liveImage = frontalSnapshot || (sweepSamples.front && sweepSamples.front.image);
+    if (liveImage) authPayload.liveImage = liveImage;
 
     try {
       const authRes = await fetch('/api/authenticate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uin: uin,
-          liveEmbedding: currentDescriptor,
-          livenessScore: padScore,
-          livenessPassed: padPassed
-        })
+        body: JSON.stringify(authPayload)
       });
       const data = await authRes.json();
+      diag.match.status = data.sweepAccepted ? 'sweep accepted' : 'rejected';
+      diag.match.isFaceMatch = data.isFaceMatch;
+      diag.match.verified = data.verified;
+      diag.match.distance = data.euclideanDistance;
+      diag.match.matchScore = data.matchScore;
+      diag.match.threshold = data.threshold != null ? data.threshold : 0.50;
+      diag.match.message = data.message || data.detail || null;
+      diag.match.padPassed = false;
+      diag.match.padScore = 0;
+      diag.match.padMessage = 'Blink is not used for this decision';
+      pushDiagEvent(
+        `Sweep ${data.sweepAccepted ? 'accepted' : 'rejected'} · face match ${data.isFaceMatch ? 'YES' : 'NO'} · yaw ${data.yawSource || '—'}`
+      );
+      renderDiagnostics();
+      const serverNote = data.message
+        ? escapeHtml(data.message)
+        : escapeHtml(data.detail || 'Sweep was not accepted.');
 
-      if (data.verified) {
+      if (data.sweepAccepted) {
         resDiv.innerHTML = `
           <div class="alert alert-success border-success p-3">
-            <div class="d-flex justify-content-between align-items-center fw-bold mb-2">
-              <span>✅ 1:1 MATCH & PAD VERIFIED!</span>
-              <span class="badge bg-success">ISO 30107-3</span>
-            </div>
-            <div class="small font-monospace">
-              <div>Citizen: <b>${data.citizen.fullName}</b> (${data.citizen.uin})</div>
-              <div>L2 Distance: <b class="text-success">${data.euclideanDistance}</b> (&lt; 0.50 threshold)</div>
-              <div>Match Confidence: <b class="text-success">${data.matchScore}%</b></div>
-              <div>PAD Liveness: <b class="text-success">${data.livenessScore}% (PASSED)</b></div>
-            </div>
-            <div class="mt-2 pt-2 border-top small font-monospace text-muted text-break">
-              🔑 OIDC Token Issued: ${data.jwtToken}
-            </div>
-          </div>
-        `;
-      } else if (!data.livenessPassed) {
-        resDiv.innerHTML = `
-          <div class="alert alert-danger border-danger p-3">
-            <div class="fw-bold mb-2">❌ PAD SPOOF DETECTED (ISO 30107-3)</div>
-            <div class="small">
-              <div>Reason: ${padMessage}</div>
-              <div>Blinks Observed: <b>${blinkCount}</b> (Min 1 natural blink required)</div>
-              <div class="text-muted mt-1">Please look directly at the webcam and blink naturally!</div>
-            </div>
+            <div class="fw-bold mb-2">Sweep submission accepted</div>
+            <div class="small">${serverNote}</div>
           </div>
         `;
       } else {
         resDiv.innerHTML = `
           <div class="alert alert-danger border-danger p-3">
-            <div class="fw-bold mb-2">❌ 1:1 MATCH REJECTED (IMPOSTOR)</div>
-            <div class="small font-monospace">
-              <div>Target: ${data.citizen.fullName}</div>
-              <div>L2 Distance: <b class="text-danger">${data.euclideanDistance}</b> (Exceeds 0.50)</div>
-              <div>Confidence: ${data.matchScore}%</div>
-            </div>
+            <div class="fw-bold mb-2">Sweep not accepted</div>
+            <div class="small">${serverNote}</div>
           </div>
         `;
       }
     } catch (e) {
-      resDiv.innerHTML = `<div class="alert alert-danger small">❌ Authentication Error: ${e.message}</div>`;
+      diag.match.status = 'error';
+      diag.match.message = e.message;
+      pushDiagEvent('Auth error: ' + e.message);
+      renderDiagnostics();
+      resDiv.innerHTML = `<div class="alert alert-danger small">Authentication error: ${escapeHtml(e.message)}</div>`;
     }
   }
 
-  loadModels();
+  renderDiagnostics();
+  loadModels().catch((err) => {
+    console.warn('Initial face-api model load failed', err);
+    pushDiagEvent('Model load failed: ' + err.message);
+  });
 </script>
 {% endblock %}
+

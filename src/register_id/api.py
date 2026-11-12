@@ -6,6 +6,7 @@ Exposes endpoints for citizen enrollment, ISO 30107-3 PAD liveness,
 """
 
 import logging
+import math
 
 from fastapi import APIRouter, HTTPException
 from register_id.cbeff import build_cbeff_xml, extract_jpeg_bytes
@@ -13,7 +14,6 @@ from register_id.embedder import embed_face_image
 from register_id.idrepo import get_idrepo_client
 from register_id.keycloak import get_keycloak_client
 from register_id.liveness import create_liveness_challenge, evaluate_liveness
-from register_id.matcher import match_embeddings
 from register_id.models import (
     AuthRequest,
     AuthResponse,
@@ -24,7 +24,9 @@ from register_id.models import (
     LivenessChallenge,
     LivenessRequest,
     LivenessResponse,
+    SweepChallenge,
 )
+from register_id.sweep import assess_sweep, create_sweep_challenge
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,37 @@ def _embed_or_422(image: str) -> list[float]:
         return embed_face_image(image)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _pose_distance(left: list[float], right: list[float]) -> float:
+    return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+
+
+def _templates_for_enrollment(req: EnrollRequest) -> list[dict]:
+    """
+    Build server-side templates from image bytes.
+
+    A head sweep stores one vector per sector. The frontal template is the
+    front sample. A single portrait stores sector "front" from faceImage.
+    """
+    if req.faceViews is not None:
+        by_sector: dict[str, list[float]] = {}
+        for sample in req.faceViews:
+            by_sector[sample.sector] = _embed_or_422(sample.image)
+
+        front = by_sector["front"]
+        for sector in ("far-left", "far-right"):
+            if _pose_distance(front, by_sector[sector]) < 0.05:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{sector} sample is not a distinct pose from the frontal sample",
+                )
+        return [
+            {"sector": sample.sector, "embedding": by_sector[sample.sector]}
+            for sample in req.faceViews
+        ]
+
+    return [{"sector": "front", "embedding": _embed_or_422(req.faceImage)}]
 
 
 @router.get("/idgenerator/uin")
@@ -56,6 +89,14 @@ def create_liveness_challenge_endpoint():
     Issues an ephemeral challenge nonce for ISO/IEC 30107-3 Level 2 anti-replay protection.
     """
     return create_liveness_challenge()
+
+
+@router.post("/sweep/challenge", response_model=SweepChallenge)
+def create_sweep_challenge_endpoint():
+    """
+    Issues a single-use head-sweep challenge. Blink score is not part of verification.
+    """
+    return create_sweep_challenge()
 
 
 @router.get("/citizens", response_model=list[CitizenSummary])
@@ -106,10 +147,12 @@ def check_liveness_endpoint(req: LivenessRequest):
 @router.post("/enroll")
 def enroll_citizen_endpoint(req: EnrollRequest):
     """
-    Enrolls a citizen face through the MOSIP IDRepo REST interface.
+    Enrolls a citizen face through the MOSIP IDRepo REST interface:
+    1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
+    2. Computes 128-D templates from the image bytes. Client vectors are rejected.
+    3. Persists demographics on the identity and templates on the IDA table.
 
-    The frontal template is computed from the image bytes. A client-supplied
-    embedding is not accepted. Keycloak login is a separate POST /api/credentials call.
+    Keycloak login is a separate POST /api/credentials call. No password is accepted here.
     """
     idrepo = get_idrepo_client()
 
@@ -120,7 +163,7 @@ def enroll_citizen_endpoint(req: EnrollRequest):
     except Exception as e:
         logger.warning(f"Could not construct CBEFF XML (storing raw data): {e}")
 
-    templates = [{"sector": "front", "embedding": _embed_or_422(req.faceImage)}]
+    templates = _templates_for_enrollment(req)
     saved = idrepo.add_identity(
         uin=req.uin,
         full_name=req.fullName,
@@ -176,44 +219,36 @@ def issue_credentials_endpoint(req: CredentialRequest):
 @router.post("/authenticate", response_model=AuthResponse)
 def authenticate_citizen_endpoint(req: AuthRequest):
     """
-    1:1 check of the live probe against the frontal template in the IDA table.
+    Verify a five-pose head sweep bound to an expiring challenge.
+
+    Blink flags on the request are ignored. The hash embedder is not a face
+    model, so a passing sweep is a submission check, not an identity match
+    and not proof of a live head turn.
     """
     idrepo = get_idrepo_client()
     citizen = idrepo.get_identity(req.uin)
     if not citizen:
         raise HTTPException(status_code=404, detail=f"Citizen UIN '{req.uin}' not found in registry.")
 
-    templates = idrepo.get_face_templates(req.uin)
-    front = next((item["embedding"] for item in templates if item["sector"] == "front"), None)
-    if not isinstance(front, list):
-        raise HTTPException(status_code=404, detail=f"No frontal template stored for UIN '{req.uin}'.")
-
-    is_match, distance, match_score = match_embeddings(
-        stored=front,
-        probe=req.liveEmbedding,
-        threshold=MATCH_THRESHOLD,
-    )
-    verified = is_match and req.livenessPassed
-
-    jwt_token = (
-        f"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.mosip_verified_citizen_{citizen['uin']}.mock_sig"
-        if verified
-        else None
-    )
+    assessment = assess_sweep(req.challengeId, req.liveViews)
+    verified = assessment.accepted
 
     return AuthResponse(
         status="SUCCESS" if verified else "FAILED",
         verified=verified,
-        isFaceMatch=is_match,
-        livenessPassed=req.livenessPassed,
-        euclideanDistance=distance,
-        matchScore=match_score,
-        livenessScore=req.livenessScore,
+        isFaceMatch=False,
+        livenessPassed=False,
+        euclideanDistance=1.0,
+        matchScore=0.0,
+        livenessScore=0.0,
         threshold=MATCH_THRESHOLD,
         citizen={
             "uin": citizen["uin"],
             "fullName": citizen["full_name"],
             "email": citizen.get("email"),
         },
-        jwtToken=jwt_token,
+        jwtToken=None,
+        message=assessment.message,
+        sweepAccepted=assessment.accepted,
+        yawSource=assessment.yaw_source,
     )
