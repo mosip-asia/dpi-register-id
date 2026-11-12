@@ -1,0 +1,212 @@
+% Citizen portal technology stack for register-id.
+% Companion to business-requirements.tex.
+% Compile from this directory:
+%   lualatex tech-stack.tex
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=2.15cm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Helvetica Neue}
+\setsansfont{Helvetica Neue}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+\usepackage{setspace}
+
+\definecolor{ink}{HTML}{2E2F30}
+\definecolor{muted}{HTML}{5E6061}
+\definecolor{green}{HTML}{3F6433}
+\definecolor{rule}{HTML}{D9D6CE}
+
+\setlist[itemize]{leftmargin=1.15em,itemsep=0.22em,topsep=0.35em,parsep=0pt}
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{0pt}
+\setstretch{1.05}
+
+\pagestyle{plain}
+\hypersetup{
+  pdftitle={register-id Citizen Portal},
+  pdfauthor={Asian Institute of Technology},
+  colorlinks=true,
+  linkcolor=green,
+  urlcolor=green
+}
+
+\titleformat{\section}
+  {\Large\bfseries\sffamily\color{green}}
+  {\thesection}{0.7em}{}
+  [\vspace{0.15em}{\color{rule}\titlerule}]
+\titleformat{\subsection}
+  {\large\bfseries\sffamily\color{ink}}
+  {\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.35em}{0.55em}
+\titlespacing*{\subsection}{0pt}{0.95em}{0.3em}
+
+\newcommand{\why}[1]{\textbf{Purpose.}\ #1\par}
+\newcommand{\serves}[1]{\textbf{Requirements.}\ #1\par}
+
+\begin{document}
+\color{ink}
+
+{\sffamily\bfseries\LARGE\color{green} register-id}\\[0.25em]
+{\sffamily\Large Citizen Registration Gateway}\\[0.15em]
+{\sffamily\large The citizen portal}\\[0.7em]
+{\color{rule}\rule{\textwidth}{1.1pt}}\\[0.55em]
+{\small\color{muted}
+Asian Institute of Technology \textperiodcentered\
+MOSIP Asia Digital Public Infrastructure \textperiodcentered\
+12 November 2026\par
+}
+\vspace{0.4em}
+
+\noindent
+This note is the technology of the citizen portal: the pages a person uses to enroll, verify a capture, and create a login. It is a companion to \href{business-requirements.pdf}{\texttt{docs/business-requirements.pdf}}. Requirement identifiers below refer to that document.
+
+\vspace{0.35em}
+\noindent
+The portal is a browser application in \texttt{web/}. Vite builds it, React holds the page, TanStack Router orders the steps, pnpm locks the page dependencies, and \texttt{branding/tokens.css} supplies color and type. The built pages are served at \texttt{/portal}. Choosing these tools does not by itself meet the requirements. It is the place the screen requirements are built. Consent copy, Thai and English text, an assisted path, and a screen that can be cleared are still to be written.
+
+\tableofcontents
+\vspace{0.6em}
+{\color{rule}\rule{\textwidth}{0.4pt}}
+
+\section{What the person has to be able to do}
+
+The accessibility section of the business requirements is a description of this portal. A person enrolls on a current phone browser or a current desktop browser. The front camera is used on a phone. The steps stay readable when the keyboard is open. A missing or denied camera offers a photo upload on the same screen and keeps the name and email already typed. Each step has one plain-language instruction in Thai or English, and that choice lasts through enrollment and login. The UIN, errors, and pose progress work from the keyboard and from a screen reader, and stay readable without relying on color. Blink cues and the head-turn guide respect reduced motion, and ``left'' means the person's left on a mirrored preview. Someone who cannot complete five head poses is offered another way to finish before the sweep is required. An operator can assist without becoming the applicant. The person can pause, retry a pose, renew a challenge, and clear the screen on a shared computer.
+
+Three security and wording rules belong to the same screens. The camera opens only after the person has agreed to capture, the purpose, and who can see the image (BR-S-06). A sweep acceptance is described as a submission check, and the page does not say ``face matched'' or ``biometrics valid'' from that result (BR-S-01, BR-T-05). The password is asked for only on the login step, and the page separates ``your registration number is saved'' from ``your login is created'' (BR-S-04, BR-A-03, BR-T-06).
+
+The portal posts a face image and demographics. It does not decide liveness, and it does not decide a match. Those answers come back as flags, and the screen uses the words the flags allow.
+
+\section{Where the portal lives}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Path} & \textbf{Role} \\
+\midrule
+\texttt{web/} & Portal source \\
+\texttt{web/src/routes/} & One route per step \\
+\texttt{web/src/styles/} & Layout that uses the brand tokens \\
+\texttt{branding/tokens.css} & Color, type, and measure \\
+\texttt{/portal} & The address a person opens \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+During development, Vite serves the portal and proxies API calls to the gateway, so the page and the enrollment calls share one origin. A slow network is a waiting state on that page. The name, the email, and the poses already accepted stay where the person typed them (BR-A-08).
+
+\section{Vite}
+
+\why{Vite is the development server and the production build. The production build emits a static site whose asset paths begin at \texttt{/portal/}, so a refresh on a later step still loads the portal rather than another page.}
+\serves{BR-A-01, BR-A-08, BR-T-08.}
+
+Phone and desktop are the same build. Layout changes for a narrow window are CSS in the portal, not a second application. Staging and production serve that same build, so the field set and the claim wording a person sees do not drift between the two (BR-T-08).
+
+\section{React}
+
+\why{The portal is a short flow with a long memory. Language, consent, name, email, a camera that may be denied, poses already accepted, a challenge id, and the password step all have to survive a retry. React keeps that state in the page for the duration of the visit.}
+\serves{BR-A-01, BR-A-02, BR-A-03, BR-A-06, BR-A-07, BR-A-08, BR-S-06, BR-T-05.}
+
+\begin{itemize}
+  \item BR-A-01. Components stack in one column on a phone, use the front camera, and show the same steps in a desktop window without horizontal scrolling.
+  \item BR-A-02. A denied, missing, or slow camera shows a short explanation and a photo upload on the capture screen. The name, the email, and any photo already chosen remain.
+  \item BR-A-03. The language choice is state from the first step through login creation. Thai and English cover buttons, pose directions, camera failure, upload, success, and password rules. Errors name the next action.
+  \item BR-A-06. Before the sweep, the page offers another way to finish for someone who cannot turn their head. A still photo kept as a draft is labeled as a draft.
+  \item BR-A-07. A helper can mark that they are assisting. The applicant's name is required. The captured face is confirmed as the applicant before submit. On a shared computer the applicant enters the password.
+  \item BR-A-08. Renewing a challenge replaces the challenge id and leaves the form. A rejected pose explains what is wrong. ``Done, clear this screen'' removes the name, the UIN, the photo, and the password. The UIN is shown in large type long enough to write down.
+  \item BR-S-06. The camera component mounts after consent. The record sent with enrollment names the purpose, the time, and the language version the person saw. Refusal stores no face image from this page.
+  \item BR-T-05. Enroll, verify, and credential issue are different screens with different sentences. While a sweep pass leaves the match and liveness flags negative, the screen says the submission was accepted.
+\end{itemize}
+
+\section{TanStack Router}
+
+\why{TanStack Router is the step order. Each step is a route under \texttt{/portal}. A refresh or a shared link opens that step. The route types keep a pose retry from landing on the password step.}
+\serves{BR-A-01, BR-A-08, BR-S-04, BR-S-06, BR-T-02, BR-T-05, BR-T-06.}
+
+The order is the order of the requirements.
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=0.35em]
+  \item Language, then consent, before any camera (BR-A-03, BR-S-06).
+  \item Legal name and email, and nothing else in the demographic set (BR-T-02). These fields survive a failed camera start (BR-A-02).
+  \item Capture, with upload on the same screen, and an assisted finish offered before the sweep is required (BR-A-02, BR-A-06, BR-A-07).
+  \item The sweep, worded as a submission check (BR-S-01, BR-T-05).
+  \item The result, with the UIN in large type, and a sentence that the registration number is saved (BR-A-03, BR-A-08).
+  \item Login creation, the only route that collects a password, after the registration number exists (BR-S-04, BR-T-06).
+\end{enumerate}
+
+Unknown paths under \texttt{/portal} return the portal's \texttt{index.html}, and the router opens the step. The credential route stays inside the portal on refresh.
+
+\section{pnpm}
+
+\why{pnpm installs and locks the libraries the page loads, including the face detection used for the viewfinder, the landmarks, and the pose guide. Every build of the portal resolves that same lockfile.}
+\serves{BR-A-01, BR-M-08, BR-T-08.}
+
+The viewfinder has to start in current Chrome, Edge, Firefox, and Safari, on a phone and on a desktop (BR-A-01). Pinning the face library is how that behavior stays the same in staging and production (BR-T-08). A later face-model change in the page is a lockfile change with a named owner, which is the screen side of BR-M-08. Replacing the model does not reorder the routes or rewrite the form.
+
+\section{The branding kit}
+
+\why{The portal imports \texttt{branding/tokens.css}. AIT Green and Dark Grey are the inks that already pass ordinary contrast on white. Metropolis is the display face. Lato is the text face. Labels, the UIN, errors, and buttons use those custom properties.}
+\serves{BR-A-04, BR-A-05.}
+
+BR-A-04 asks for a visible label on every field, pose progress in words, contrast for instructions and the UIN including on the camera panel, and pose success as a word or an icon together with color. The tokens are the contrast pairs and the type scale. Lime and sage stay off body text and off labels, because those pairs fail that contrast. The components still have to supply the labels, the focus order, and the text that a screen reader announces. The browser has to be able to enlarge the page without controls overlapping.
+
+BR-A-05 asks the page to stay still when the device requests reduced motion, and to use the person's left and right on a mirrored preview. The kit keeps the instruction at the same type scale as the rest of the page, so a still diagram and a short sentence match. The motion behavior itself is in the capture components.
+
+Official logo files still come from the Office of Public Affairs and sit in the portal header when that header is built. \texttt{branding/specimen.html} is the reference board for the tokens. It is not a route in the portal.
+
+\section{Which requirement each part carries}
+
+``Carries'' means the part is where that requirement is built. It does not mean the requirement is already met.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.1cm} >{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Part} & \textbf{What it carries in the portal} \\
+\midrule
+Vite &
+One build for phone and desktop, served at \texttt{/portal}, with the same wording in staging and production. \\
+\addlinespace
+React &
+Language, consent, the form, camera failure and upload, the assisted path, pose retries, and clearing a shared screen. \\
+\addlinespace
+TanStack Router &
+The step order from language and consent through capture, the sweep, the UIN, and only then the password. \\
+\addlinespace
+pnpm &
+A locked face library for the viewfinder, so the page a person opens is the page that was built. \\
+\addlinespace
+\texttt{tokens.css} &
+Contrast, type, and institute color for labels, errors, instructions, and the UIN. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{What the screens still have to prove}
+
+The libraries do not satisfy the acceptance checks. These are tests of the finished pages.
+
+\begin{itemize}
+  \item Chrome, Edge, Firefox, and Safari start the flow on a phone and on a desktop. On a phone the steps stack, the buttons are large enough to tap, and the camera is the front camera (BR-A-01).
+  \item Denying the camera shows everyday language and a visible upload, including when the face models have not finished loading (BR-A-02).
+  \item Thai and English can be switched before capture, a Thai name can be typed and shown back, and diagnostic codes stay closed unless someone asks for them (BR-A-03).
+  \item Every control is reachable in order from the keyboard. Pose progress is announced in words. Enlarging the page does not pile controls on top of each other (BR-A-04).
+  \item Reduced motion leaves a still instruction. ``Left'' on the mirrored preview is the person's left (BR-A-05).
+  \item The sweep is not the only way forward, and a draft photo is not described as a completed biometric check (BR-A-06, BR-S-01).
+  \item A helper can read each step aloud without the helper's face being stored as the applicant (BR-A-07).
+  \item The password can be shown while it is chosen, then hidden. Clearing the screen removes it (BR-A-08).
+\end{itemize}
+
+\vspace{1.1em}
+{\color{rule}\rule{\textwidth}{0.4pt}}\\[0.45em]
+{\small\color{muted}
+Source note. This document records the citizen portal agreed for register-id on 12 November 2026. It follows the business requirements of the same date. It does not change those requirements, and it does not certify the prototype.\par
+}
+
+\end{document}
