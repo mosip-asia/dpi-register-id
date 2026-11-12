@@ -1,0 +1,40 @@
+/*
+ * register-id branding tokens
+ * Reference only. Do not import this file into the app until the UI work starts.
+ * Official AIT colors and type roles: https://ait.ac.th/visual-identity/
+ */
+
+:root {
+  /* Official signature palette */
+  --ait-green: #3f6433;
+  --ait-lime: #a1be37;
+  --ait-sage: #8db37f;
+  --ait-grey: #494a4b;
+  --ait-grey-light: #b6b6b6;
+
+  /* Screen neutrals. Outside the signature palette. */
+  --rid-canvas: #ffffff;
+  --rid-paper: #f7f7f5;
+  --rid-line: #e4e4e2;
+  --rid-ink-on-lime: #24321e;
+
+  /* Functional alert. Outside the signature palette. Form errors only. */
+  --rid-danger: #8b3a2f;
+
+  /* Type */
+  --rid-font-display: "Metropolis", "Arial", sans-serif;
+  --rid-font-text: "Lato", "Arial", sans-serif;
+  --rid-font-identifier: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Measure */
+  --rid-space-1: 4px;
+  --rid-space-2: 8px;
+  --rid-space-3: 12px;
+  --rid-space-4: 16px;
+  --rid-space-5: 24px;
+  --rid-space-6: 32px;
+  --rid-space-7: 48px;
+  --rid-space-8: 64px;
+  --rid-radius: 4px;
+  --rid-rule: 1px solid var(--rid-line);
+}

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>register-id · AIT branding kit</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/lato@5.2.5/400.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/lato@5.2.5/700.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/metropolis@5.2.5/500.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/metropolis@5.2.5/700.css">
+  <link rel="stylesheet" href="tokens.css">
+  <style>
+    * { box-sizing: border-box; }
+    html { background: var(--rid-paper); color: var(--ait-grey); }
+    body {
+      margin: 0;
+      font-family: var(--rid-font-text);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 48px 32px 80px;
+    }
+    header.sheet {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--ait-green);
+    }
+    .kicker {
+      margin: 0 0 8px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ait-green);
+    }
+    h1 {
+      margin: 0;
+      font-family: var(--rid-font-display);
+      font-weight: 700;
+      font-size: 56px;
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+      color: var(--ait-green);
+    }
+    .meta { margin: 12px 0 0; max-width: 42ch; }
+    .ref {
+      margin: 0;
+      text-align: right;
+      font-size: 13px;
+    }
+    .ref a { color: var(--ait-green); }
+    section { margin-top: 48px; }
+    h2 {
+      margin: 0 0 16px;
+      font-family: var(--rid-font-display);
+      font-weight: 500;
+      font-size: 13px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ait-green);
+    }
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+    }
+    .swatch { min-height: 148px; padding: 14px; display: flex; flex-direction: column; justify-content: space-between; }
+    .swatch strong { display: block; font-family: var(--rid-font-display); font-weight: 700; font-size: 18px; }
+    .swatch span { font-size: 13px; }
+    .g { background: var(--ait-green); color: white; }
+    .l { background: var(--ait-lime); color: var(--rid-ink-on-lime); }
+    .s { background: var(--ait-sage); color: #24321e; }
+    .d { background: var(--ait-grey); color: white; }
+    .lg { background: var(--ait-grey-light); color: #24321e; }
+    .note { margin: 12px 0 0; font-size: 14px; max-width: 70ch; }
+    .type-row { display: grid; gap: 18px; padding: 8px 0 4px; }
+    .display {
+      margin: 0;
+      font-family: var(--rid-font-display);
+      font-weight: 700;
+      font-size: 42px;
+      line-height: 1.1;
+      color: var(--ait-green);
+    }
+    .body-sample { margin: 0; max-width: 62ch; }
+    .alpha {
+      margin: 0;
+      font-family: var(--rid-font-display);
+      font-size: 20px;
+      letter-spacing: 0.04em;
+      color: var(--ait-grey);
+    }
+    .lockup {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+      background: white;
+      border: 1px solid var(--rid-line);
+      padding: 28px;
+    }
+    .logo-slot {
+      width: 180px;
+      height: 72px;
+      border: 1px dashed var(--ait-green);
+      color: var(--ait-green);
+      display: grid;
+      place-items: center;
+      text-align: center;
+      font-size: 12px;
+      line-height: 1.35;
+      padding: 8px;
+    }
+    .rule { width: 1px; align-self: stretch; background: var(--ait-grey-light); }
+    .pname {
+      margin: 0;
+      font-family: var(--rid-font-display);
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+      color: var(--ait-green);
+    }
+    .pdesc { margin: 2px 0 0; font-size: 14px; }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    button, .ghost {
+      font-family: var(--rid-font-text);
+      font-size: 15px;
+      font-weight: 700;
+      border-radius: var(--rid-radius);
+      padding: 10px 16px;
+    }
+    button.primary {
+      background: var(--ait-green);
+      color: white;
+      border: 1px solid var(--ait-green);
+    }
+    .ghost {
+      background: white;
+      color: var(--ait-grey);
+      border: 1px solid var(--ait-grey);
+    }
+    .chip {
+      background: var(--ait-lime);
+      color: var(--rid-ink-on-lime);
+      font-weight: 700;
+      font-size: 13px;
+      padding: 6px 10px;
+      border-radius: var(--rid-radius);
+    }
+    .uin {
+      font-family: var(--rid-font-identifier);
+      background: white;
+      border: 1px solid var(--rid-line);
+      padding: 10px 12px;
+      letter-spacing: 0.04em;
+    }
+    .pair {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .card {
+      background: white;
+      border: 1px solid var(--rid-line);
+      padding: 20px 22px;
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-family: var(--rid-font-display);
+      font-size: 18px;
+      color: var(--ait-green);
+    }
+    .card ul { margin: 0; padding-left: 18px; }
+    .card li + li { margin-top: 6px; }
+    footer {
+      margin-top: 56px;
+      padding-top: 16px;
+      border-top: 1px solid var(--rid-line);
+      font-size: 13px;
+    }
+    @media (max-width: 800px) {
+      h1 { font-size: 40px; }
+      header.sheet, .swatches, .pair, .lockup { grid-template-columns: 1fr; display: grid; }
+      .ref { text-align: left; }
+      .rule { width: 100%; height: 1px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="sheet">
+      <div>
+        <p class="kicker">Asian Institute of Technology</p>
+        <h1>register-id</h1>
+        <p class="meta">Citizen Registration Gateway. Branding reference taken from the official institute site. Not wired into the application.</p>
+      </div>
+      <p class="ref">
+        Social Impact with Innovation<br>
+        <a href="https://ait.ac.th/visual-identity/">ait.ac.th/visual-identity</a>
+      </p>
+    </header>
+
+    <section>
+      <h2>Signature color</h2>
+      <div class="swatches">
+        <div class="swatch g"><strong>Green</strong><span>#3F6433<br>Primary</span></div>
+        <div class="swatch l"><strong>Lime</strong><span>#A1BE37<br>Emphasis</span></div>
+        <div class="swatch s"><strong>Sage</strong><span>#8DB37F<br>Accent</span></div>
+        <div class="swatch d"><strong>Grey</strong><span>#494A4B<br>Text</span></div>
+        <div class="swatch lg"><strong>Light grey</strong><span>#B6B6B6<br>Rules</span></div>
+      </div>
+      <p class="note">AIT Green is the identifier. Lime is one emphasis on a screen, as a fill or a large heading. Lime, sage, and light grey fail as small text on white.</p>
+    </section>
+
+    <section>
+      <h2>Type</h2>
+      <div class="type-row">
+        <p class="display">Metropolis for titles.</p>
+        <p class="body-sample">Lato for everything a person reads: instructions, labels, and the line under the product name. Email signatures stay Arial, in black or grey, which is the institute rule.</p>
+        <p class="alpha">ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Lockup</h2>
+      <div class="lockup">
+        <div class="logo-slot">Official AIT<br>primary logo<br>from OPA</div>
+        <div class="rule"></div>
+        <div>
+          <p class="pname">register-id</p>
+          <p class="pdesc">Citizen Registration Gateway</p>
+        </div>
+      </div>
+      <p class="note">The dashed box is a placeholder. Drop in the official file. Do not draw a globe, change its colors, or merge it with the product name. Clear space equals the width of the capital A. Primary logo stays at least 150 px wide on screen.</p>
+    </section>
+
+    <section>
+      <h2>Interface samples</h2>
+      <div class="actions">
+        <button class="primary" type="button">Continue</button>
+        <span class="ghost">Back</span>
+        <span class="chip">One lime note</span>
+        <span class="uin">UIN 2841 0093 5521</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>Use</h2>
+      <div class="pair">
+        <article class="card">
+          <h3>Keep</h3>
+          <ul>
+            <li>Green logo on white, white logo on dark photography.</li>
+            <li>Metropolis titles, Lato text, 4 px corners.</li>
+            <li>Campus and landscape photography when a picture is needed.</li>
+            <li>The motto as the institute line, not as button copy.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Leave out</h3>
+          <ul>
+            <li>A redrawn or recolored globe.</li>
+            <li>Lime or sage as small text on white.</li>
+            <li>Extra brand hues, gradients, and pill buttons.</li>
+            <li>Stock offices and a second product symbol.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      Values in tokens.css and tokens.json. Guidelines: ait.ac.th/brand-guidelines · Logo manual, December 2023.
+    </footer>
+  </main>
+</body>
+</html>
