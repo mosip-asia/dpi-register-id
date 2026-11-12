@@ -11,6 +11,7 @@ This directory contains technical architecture specifications, deployment proced
 | **[`user-manual.md`](user-manual.md)** | **Hands-On User Manual:** Step-by-step walkthrough for developers to spin up the stack, test WebRTC liveness, enroll citizen biometrics into IDRepo, verify 1:1 match, and test spoof rejection. |
 | **[`objectives-and-milestones.md`](objectives-and-milestones.md)** | **Primary Project Specification:** Zero-hardware citizen onboarding, ISO/IEC 30107-3 PAD liveness, ISO 19794-5 CBEFF packaging, MOSIP IDRepo & Keycloak IAM bridge, RACI matrix, and 8-week delivery milestones (Weeks 1–8). |
 | **[`deployment.md`](deployment.md)** | **Deployment & Infrastructure Guide:** GitHub Actions multi-environment CD pipeline (`cd.yml`), NetBird VPN mesh setup, Traefik reverse proxy overlay, and automated host rollbacks (`.deploy_success`). |
+| **[`working-tree.md`](working-tree.md)** | **Feature commits on `feat/identity-split-and-sweep`:** Template split, credential split, hash embedder, head-sweep verification, web scripts, branding kit, and the system diagram. |
 | **[`../branding/README.md`](../branding/README.md)** | **Branding kit:** Official AIT color, type, and logo rules for register-id. Reference only; not applied to the web UI yet. |
 | **[`../AGENTS.md`](../AGENTS.md)** | **Operational Invariants:** Coding guidelines, branching model (`dev` -> `stg` -> `main`), sensitive data guard rules, and release automation. |
 
