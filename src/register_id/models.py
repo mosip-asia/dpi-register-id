@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from register_id.consent import ConsentRecord, validate_consent
+
 
 class LivenessChallenge(BaseModel):
     challengeId: str = Field(..., description="Unique nonce identifier for this liveness session")
@@ -100,10 +102,12 @@ class EnrollRequest(BaseModel):
     email: str = Field(..., max_length=128, description="Citizen email address")
     faceImage: str = Field(..., description="Base64-encoded face image (JPEG/PNG data URL)")
     faceViews: list[FaceViewSample] | None = None
+    consent: ConsentRecord
 
     @model_validator(mode="after")
     def _validate_face_views(self) -> "EnrollRequest":
         validate_face_views(self.faceViews)
+        self.consent = validate_consent(self.consent)
         return self
 
 
@@ -147,15 +151,28 @@ class AuthResponse(BaseModel):
     verified: bool
     isFaceMatch: bool
     livenessPassed: bool
-    euclideanDistance: float
-    matchScore: float
-    livenessScore: float
-    threshold: float
+    euclideanDistance: float | None = None
+    matchScore: float | None = None
+    livenessScore: float | None = None
+    threshold: float | None = None
     citizen: dict[str, Any]
     jwtToken: str | None = None
     message: str | None = None
     sweepAccepted: bool = False
     yawSource: str | None = None
+
+
+class DemographicsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fullName: str = Field(..., min_length=1, max_length=128)
+    email: str | None = Field(default=None, max_length=128)
+
+
+class LoginDisabledUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    disabled: bool
 
 
 class CitizenSummary(BaseModel):

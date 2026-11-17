@@ -27,3 +27,6 @@ notebooks/
 .coverage
 .pytest_cache/
 .hypothesis/
+
+web/node_modules/
+web/dist/

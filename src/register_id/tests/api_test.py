@@ -14,6 +14,15 @@ def _data_url(payload: bytes) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def _consent() -> dict:
+    return {
+        "accepted": True,
+        "purpose": "Store a face template for later identity checks",
+        "acceptedAt": 1_763_000_000.0,
+        "language": "eng",
+    }
+
+
 def _sweep_challenge() -> str:
     res = client.post("/api/sweep/challenge")
     assert res.status_code == 200
@@ -37,7 +46,7 @@ def test_api_check_liveness_endpoint():
     assert data["livenessScore"] >= 80.0
 
 
-def test_api_enroll_and_authenticate_flow():
+def test_api_enroll_and_authenticate_flow(monkeypatch):
     face_image = _data_url(b"mock-face-bytes-enroll-front")
     other_image = _data_url(b"mock-face-bytes-impostor-probe")
     uin = "9876-5432-1098"
@@ -47,6 +56,7 @@ def test_api_enroll_and_authenticate_flow():
         "fullName": "Test Citizen",
         "email": "test@citizen.asia",
         "faceImage": face_image,
+        "consent": _consent(),
     }
 
     enroll_res = client.post("/api/enroll", json=enroll_payload)
@@ -67,7 +77,11 @@ def test_api_enroll_and_authenticate_flow():
     front = next(item for item in templates if item["sector"] == "front")
     assert front["embedding"] == embed_face_image(face_image)
 
-    list_res = client.get("/api/citizens")
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_TOKEN", "test-operator")
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_ROLE", "reader")
+    closed = client.get("/api/citizens")
+    assert closed.status_code == 401
+    list_res = client.get("/api/citizens", headers={"Authorization": "Bearer test-operator"})
     assert list_res.status_code == 200
     uins = [c["uin"] for c in list_res.json()]
     assert uin in uins
@@ -136,6 +150,7 @@ def test_api_enroll_and_authenticate_head_sweep():
             "email": "sweep@citizen.asia",
             "faceImage": _data_url(b"sweep-portrait-for-cbeff"),
             "faceViews": views,
+            "consent": _consent(),
         },
     )
     assert enroll_res.status_code == 200
@@ -163,6 +178,7 @@ def test_api_enroll_and_authenticate_head_sweep():
             "fullName": "Weak Turn",
             "email": "weak@citizen.asia",
             "faceImage": _data_url(b"weak-turn-portrait"),
+            "consent": _consent(),
             "faceViews": [
                 {"sector": "far-left", "yaw": -0.20, "image": _data_url(b"weak-far-left")},
                 {"sector": "left", "yaw": -0.4, "image": _data_url(b"weak-left")},
@@ -187,6 +203,7 @@ def test_api_enroll_and_authenticate_head_sweep():
             "email": "copied@citizen.asia",
             "faceImage": _data_url(b"copied-portrait"),
             "faceViews": copied_views,
+            "consent": _consent(),
         },
     )
     assert copied.status_code == 422
@@ -303,6 +320,7 @@ def test_enroll_rejects_password_and_client_embedding():
         "fullName": "Reject Extra",
         "email": "reject@citizen.asia",
         "faceImage": image,
+        "consent": _consent(),
     }
     with_password = client.post("/api/enroll", json={**base, "password": "SecretPassword123!"})
     assert with_password.status_code == 422
@@ -331,16 +349,15 @@ def test_api_credentials_issue_after_enroll():
             "fullName": "Credential Citizen",
             "email": "credential@citizen.asia",
             "faceImage": image,
+            "consent": _consent(),
         },
     )
     assert enroll_res.status_code == 200
     assert "keycloakProvisioned" not in enroll_res.json()
 
     issued = client.post("/api/credentials", json={"uin": uin, "password": password})
-    assert issued.status_code == 200
-    body = issued.json()
-    assert body["uin"] == uin
-    assert isinstance(body["keycloakProvisioned"], bool)
+    assert issued.status_code == 502
+    assert "Keycloak did not store the login" in issued.json()["detail"]
 
     stored = IDRepoClient(enable_inprocess_fallback=True).get_identity(uin)
     assert stored is not None

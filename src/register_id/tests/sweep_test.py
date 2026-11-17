@@ -1,8 +1,7 @@
 import base64
-import time
 
 from register_id.models import FaceViewSample
-from register_id.sweep import _CHALLENGES, assess_sweep, create_sweep_challenge, estimate_yaw_from_image
+from register_id.sweep import assess_sweep, create_sweep_challenge, estimate_yaw_from_image
 
 
 def _views() -> list[FaceViewSample]:
@@ -29,8 +28,7 @@ def test_estimate_yaw_is_unavailable_without_a_face_model():
 
 def test_sweep_challenge_expires_and_does_not_claim_liveness():
     challenge = create_sweep_challenge()
-    _CHALLENGES[challenge.challengeId]["expiresAt"] = time.time() - 1
-    result = assess_sweep(challenge.challengeId, _views())
+    result = assess_sweep(challenge.challengeId, _views(), now=challenge.createdAt + 91)
     assert result.accepted is False
     assert "expired" in result.message
 

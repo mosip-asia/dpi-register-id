@@ -10,6 +10,7 @@ import secrets
 import time
 from dataclasses import dataclass
 
+from register_id.challenge_store import get_challenge_store, in_memory_records
 from register_id.embedder import embed_face_image
 from register_id.matcher import compute_euclidean_distance
 from register_id.models import FACE_VIEW_SECTORS, FaceViewSample, SweepChallenge
@@ -18,7 +19,9 @@ SWEEP_TTL_SECONDS = 90
 MIN_YAW_STEP = 0.08
 MIN_IMAGE_DISTANCE = 0.05
 
-_CHALLENGES: dict[str, dict] = {}
+# Same dict the memory store uses. Tests force expiry by writing expiresAt
+# here when REDIS_URL is unset. A configured Redis store does not read it.
+_CHALLENGES = in_memory_records()
 
 
 @dataclass(frozen=True)
@@ -41,16 +44,13 @@ def estimate_yaw_from_image(image: str) -> float | None:
 
 def create_sweep_challenge() -> SweepChallenge:
     now = time.time()
-    expired = [key for key, item in _CHALLENGES.items() if item["expiresAt"] < now - 60]
-    for key in expired:
-        _CHALLENGES.pop(key, None)
-
     challenge_id = f"sweep_{secrets.token_hex(8)}"
-    _CHALLENGES[challenge_id] = {
-        "createdAt": now,
-        "expiresAt": now + SWEEP_TTL_SECONDS,
-        "used": False,
-    }
+    get_challenge_store().issue(
+        challenge_id,
+        {"createdAt": now},
+        SWEEP_TTL_SECONDS,
+        now=now,
+    )
     return SweepChallenge(
         challengeId=challenge_id,
         timeLimitSeconds=SWEEP_TTL_SECONDS,
@@ -65,13 +65,11 @@ def create_sweep_challenge() -> SweepChallenge:
 def _consume(challenge_id: str | None, now: float) -> str | None:
     if not challenge_id:
         return "Sweep rejected: missing challenge."
-    challenge = _CHALLENGES.get(challenge_id)
-    if challenge is None or challenge["used"]:
-        return "Sweep rejected: unknown or already used challenge."
-    if now > challenge["expiresAt"]:
-        challenge["used"] = True
+    result = get_challenge_store().consume(challenge_id, now=now)
+    if result.reason == "expired":
         return "Sweep rejected: challenge expired. Start the camera again."
-    challenge["used"] = True
+    if not result.ok:
+        return "Sweep rejected: unknown or already used challenge."
     return None
 
 

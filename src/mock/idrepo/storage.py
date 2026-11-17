@@ -4,8 +4,9 @@ Storage backend for Mock MOSIP IDRepo.
 Connects to PostgreSQL (mosip_idrepo schema) when available,
 with automatic SQLite fallback for offline environments.
 
-Identity rows store demographics, the face image, and CBEFF only.
-Match vectors live in face_template (mosip_ida on PostgreSQL).
+Identity rows store demographics, record status, the login-disabled flag,
+the face image, and CBEFF only. Match vectors live in face_template
+(mosip_ida on PostgreSQL). The gateway reaches this store through HTTP.
 """
 
 import json
@@ -41,6 +42,16 @@ def _embedding_text(embedding: Any) -> str:
     if isinstance(embedding, str):
         return embedding
     return json.dumps(embedding)
+
+
+def _normalize_identity(row: dict[str, Any]) -> dict[str, Any]:
+    record = dict(row)
+    record["status"] = record.get("status") or "draft"
+    record["login_disabled"] = bool(record.get("login_disabled"))
+    return record
+
+
+_RECORD_STATUSES = frozenset({"draft", "biometric"})
 
 
 class IDRepoStorage:
@@ -84,9 +95,12 @@ class IDRepoStorage:
                         email TEXT,
                         face_image TEXT,
                         cbeff_xml TEXT,
+                        status TEXT NOT NULL DEFAULT 'draft',
+                        login_disabled INTEGER NOT NULL DEFAULT 0,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
+                self._migrate_sqlite(conn)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS face_template (
                         uin TEXT NOT NULL,
@@ -115,8 +129,18 @@ class IDRepoStorage:
                             email VARCHAR(128),
                             face_image TEXT,
                             cbeff_xml TEXT,
+                            status VARCHAR(16) NOT NULL DEFAULT 'draft',
+                            login_disabled BOOLEAN NOT NULL DEFAULT FALSE,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );
+                    """)
+                    cur.execute("""
+                        ALTER TABLE mosip_idrepo.citizen_identity
+                        ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'draft';
+                    """)
+                    cur.execute("""
+                        ALTER TABLE mosip_idrepo.citizen_identity
+                        ADD COLUMN IF NOT EXISTS login_disabled BOOLEAN NOT NULL DEFAULT FALSE;
                     """)
                     cur.execute("CREATE SCHEMA IF NOT EXISTS mosip_ida;")
                     cur.execute("""
@@ -139,6 +163,19 @@ class IDRepoStorage:
 
         self.active_backend = "sqlite"
         logger.info(f"IDRepo storage initialized on SQLite fallback: {_SQLITE_PATH}")
+
+    def _migrate_sqlite(self, conn) -> None:
+        info = conn.execute("PRAGMA table_info(citizen_identity)").fetchall()
+        present = {row[1] for row in info}
+        if "status" not in present:
+            conn.execute(
+                "ALTER TABLE citizen_identity ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'"
+            )
+        if "login_disabled" not in present:
+            conn.execute(
+                "ALTER TABLE citizen_identity "
+                "ADD COLUMN login_disabled INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _clear_legacy_pg(self, cur, uin: str) -> None:
         """Null leftover template columns on databases created before the split."""
@@ -177,7 +214,13 @@ class IDRepoStorage:
         email: str | None,
         face_image: str | None,
         cbeff_xml: str | None,
+        status: str = "draft",
     ) -> bool:
+        # Callers that omit status stay draft. A face on the row is not a match.
+        if status not in _RECORD_STATUSES:
+            logger.error(f"Refusing identity save with status '{status}'")
+            return False
+
         if self.active_backend == "postgres":
             conn = self._get_pg_connection()
             if conn:
@@ -185,14 +228,15 @@ class IDRepoStorage:
                     with conn.cursor() as cur:
                         cur.execute("""
                             INSERT INTO mosip_idrepo.citizen_identity
-                                (uin, full_name, email, face_image, cbeff_xml)
-                            VALUES (%s, %s, %s, %s, %s)
+                                (uin, full_name, email, face_image, cbeff_xml, status)
+                            VALUES (%s, %s, %s, %s, %s, %s)
                             ON CONFLICT (uin) DO UPDATE
                             SET full_name = EXCLUDED.full_name,
                                 email = EXCLUDED.email,
                                 face_image = EXCLUDED.face_image,
-                                cbeff_xml = EXCLUDED.cbeff_xml;
-                        """, (uin, full_name, email, face_image, cbeff_xml))
+                                cbeff_xml = EXCLUDED.cbeff_xml,
+                                status = EXCLUDED.status;
+                        """, (uin, full_name, email, face_image, cbeff_xml, status))
                         self._clear_legacy_pg(cur, uin)
                     conn.commit()
                     return True
@@ -207,18 +251,158 @@ class IDRepoStorage:
             with conn:
                 conn.execute("""
                     INSERT INTO citizen_identity
-                        (uin, full_name, email, face_image, cbeff_xml)
-                    VALUES (?, ?, ?, ?, ?)
+                        (uin, full_name, email, face_image, cbeff_xml, status)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT (uin) DO UPDATE
                     SET full_name = excluded.full_name,
                         email = excluded.email,
                         face_image = excluded.face_image,
-                        cbeff_xml = excluded.cbeff_xml;
-                """, (uin, full_name, email, face_image, cbeff_xml))
+                        cbeff_xml = excluded.cbeff_xml,
+                        status = excluded.status;
+                """, (uin, full_name, email, face_image, cbeff_xml, status))
                 self._clear_legacy_sqlite(conn, uin)
             return True
         except Exception as e:
             logger.error(f"SQLite insert failed: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def _sqlite_has_uin(self, conn, uin: str) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM citizen_identity WHERE uin = ?",
+            (uin,),
+        ).fetchone()
+        return row is not None
+
+    def update_demographics(self, uin: str, full_name: str, email: str | None) -> bool:
+        """Correct name and email. Face bytes, templates, status, and login flag stay."""
+        if self.active_backend == "postgres":
+            conn = self._get_pg_connection()
+            if conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE mosip_idrepo.citizen_identity
+                            SET full_name = %s, email = %s
+                            WHERE uin = %s;
+                        """, (full_name, email, uin))
+                        cur.execute(
+                            "SELECT 1 FROM mosip_idrepo.citizen_identity WHERE uin = %s;",
+                            (uin,),
+                        )
+                        updated = cur.fetchone() is not None
+                    conn.commit()
+                    return updated
+                except Exception as e:
+                    logger.error(f"PostgreSQL demographic update failed: {e}")
+                    conn.rollback()
+                finally:
+                    conn.close()
+
+        conn = self._get_sqlite_connection()
+        try:
+            with conn:
+                conn.execute("""
+                    UPDATE citizen_identity
+                    SET full_name = ?, email = ?
+                    WHERE uin = ?;
+                """, (full_name, email, uin))
+                return self._sqlite_has_uin(conn, uin)
+        except Exception as e:
+            logger.error(f"SQLite demographic update failed: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def set_login_disabled(self, uin: str, disabled: bool) -> bool:
+        """Operator flag stored on the identity. This does not call Keycloak."""
+        flag = bool(disabled)
+        if self.active_backend == "postgres":
+            conn = self._get_pg_connection()
+            if conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE mosip_idrepo.citizen_identity
+                            SET login_disabled = %s
+                            WHERE uin = %s;
+                        """, (flag, uin))
+                        cur.execute(
+                            "SELECT 1 FROM mosip_idrepo.citizen_identity WHERE uin = %s;",
+                            (uin,),
+                        )
+                        updated = cur.fetchone() is not None
+                    conn.commit()
+                    return updated
+                except Exception as e:
+                    logger.error(f"PostgreSQL login flag update failed: {e}")
+                    conn.rollback()
+                finally:
+                    conn.close()
+
+        conn = self._get_sqlite_connection()
+        try:
+            with conn:
+                conn.execute("""
+                    UPDATE citizen_identity
+                    SET login_disabled = ?
+                    WHERE uin = ?;
+                """, (1 if flag else 0, uin))
+                return self._sqlite_has_uin(conn, uin)
+        except Exception as e:
+            logger.error(f"SQLite login flag update failed: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def delete_face(self, uin: str) -> bool:
+        """Remove the face image, CBEFF document, and face templates for one UIN."""
+        if self.active_backend == "postgres":
+            conn = self._get_pg_connection()
+            if conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT 1 FROM mosip_idrepo.citizen_identity WHERE uin = %s;",
+                            (uin,),
+                        )
+                        if cur.fetchone() is None:
+                            conn.rollback()
+                            return False
+                        cur.execute("""
+                            UPDATE mosip_idrepo.citizen_identity
+                            SET face_image = NULL, cbeff_xml = NULL
+                            WHERE uin = %s;
+                        """, (uin,))
+                        cur.execute(
+                            "DELETE FROM mosip_ida.face_template WHERE uin = %s;",
+                            (uin,),
+                        )
+                        self._clear_legacy_pg(cur, uin)
+                    conn.commit()
+                    return True
+                except Exception as e:
+                    logger.error(f"PostgreSQL face delete failed: {e}")
+                    conn.rollback()
+                finally:
+                    conn.close()
+
+        conn = self._get_sqlite_connection()
+        try:
+            with conn:
+                if not self._sqlite_has_uin(conn, uin):
+                    return False
+                conn.execute("""
+                    UPDATE citizen_identity
+                    SET face_image = NULL, cbeff_xml = NULL
+                    WHERE uin = ?;
+                """, (uin,))
+                conn.execute("DELETE FROM face_template WHERE uin = ?;", (uin,))
+                self._clear_legacy_sqlite(conn, uin)
+            return True
+        except Exception as e:
+            logger.error(f"SQLite face delete failed: {e}")
             return False
         finally:
             conn.close()
@@ -316,11 +500,12 @@ class IDRepoStorage:
                     from psycopg2.extras import RealDictCursor
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute("""
-                            SELECT uin, full_name, email, face_image, cbeff_xml, created_at
+                            SELECT uin, full_name, email, face_image, cbeff_xml,
+                                   status, login_disabled, created_at
                             FROM mosip_idrepo.citizen_identity WHERE uin = %s;
                         """, (uin,))
                         row = cur.fetchone()
-                        return dict(row) if row else None
+                        return _normalize_identity(dict(row)) if row else None
                 except Exception as e:
                     logger.error(f"PostgreSQL select failed: {e}")
                 finally:
@@ -330,12 +515,13 @@ class IDRepoStorage:
         try:
             cur = conn.cursor()
             cur.execute("""
-                SELECT uin, full_name, email, face_image, cbeff_xml, created_at
+                SELECT uin, full_name, email, face_image, cbeff_xml,
+                       status, login_disabled, created_at
                 FROM citizen_identity WHERE uin = ?;
             """, (uin,))
             row = cur.fetchone()
             if row:
-                return dict(row)
+                return _normalize_identity(dict(row))
             return None
         finally:
             conn.close()
@@ -348,11 +534,11 @@ class IDRepoStorage:
                     from psycopg2.extras import RealDictCursor
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute("""
-                            SELECT uin, full_name, email, created_at
+                            SELECT uin, full_name, email, status, login_disabled, created_at
                             FROM mosip_idrepo.citizen_identity
                             ORDER BY created_at DESC LIMIT %s;
                         """, (limit,))
-                        return [dict(r) for r in cur.fetchall()]
+                        return [_normalize_identity(dict(r)) for r in cur.fetchall()]
                 except Exception as e:
                     logger.error(f"PostgreSQL list failed: {e}")
                 finally:
@@ -362,10 +548,10 @@ class IDRepoStorage:
         try:
             cur = conn.cursor()
             cur.execute("""
-                SELECT uin, full_name, email, created_at
+                SELECT uin, full_name, email, status, login_disabled, created_at
                 FROM citizen_identity
                 ORDER BY created_at DESC LIMIT ?;
             """, (limit,))
-            return [dict(r) for r in cur.fetchall()]
+            return [_normalize_identity(dict(r)) for r in cur.fetchall()]
         finally:
             conn.close()

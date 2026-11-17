@@ -9,14 +9,11 @@ static photographs and digital replays.
 import logging
 import secrets
 import time
-from typing import Any
 
+from register_id.challenge_store import get_challenge_store
 from register_id.models import LivenessChallenge, LivenessRequest, LivenessResponse
 
 logger = logging.getLogger(__name__)
-
-# In-memory store for active ephemeral challenge nonces
-_ACTIVE_CHALLENGES: dict[str, dict[str, Any]] = {}
 
 
 def create_liveness_challenge() -> LivenessChallenge:
@@ -28,18 +25,17 @@ def create_liveness_challenge() -> LivenessChallenge:
     challenge_id = f"pad_{secrets.token_hex(8)}"
     time_limit_sec = 10
 
-    # Housekeeping: prune challenges older than 60 seconds
-    expired = [k for k, v in _ACTIVE_CHALLENGES.items() if v.get("expiresAt", 0) < now - 60]
-    for k in expired:
-        _ACTIVE_CHALLENGES.pop(k, None)
-
-    _ACTIVE_CHALLENGES[challenge_id] = {
-        "action": "BLINK_TWICE",
-        "targetBlinks": 2,
-        "timeLimitSeconds": time_limit_sec,
-        "createdAt": now,
-        "expiresAt": now + time_limit_sec,
-    }
+    get_challenge_store().issue(
+        challenge_id,
+        {
+            "action": "BLINK_TWICE",
+            "targetBlinks": 2,
+            "timeLimitSeconds": time_limit_sec,
+            "createdAt": now,
+        },
+        time_limit_sec,
+        now=now,
+    )
 
     return LivenessChallenge(
         challengeId=challenge_id,
@@ -63,7 +59,7 @@ def evaluate_liveness(req: LivenessRequest) -> LivenessResponse:
     """
     if req.bypassLiveness:
         if req.challengeId:
-            _ACTIVE_CHALLENGES.pop(req.challengeId, None)
+            get_challenge_store().consume(req.challengeId)
         return LivenessResponse(
             status="PASSED",
             livenessScore=95.0,
@@ -80,9 +76,11 @@ def evaluate_liveness(req: LivenessRequest) -> LivenessResponse:
             message="Presentation Attack / Spoof Detected (Static photo or insufficient motion).",
         )
 
-    # Validate active challenge if provided
+    # Validate active challenge if provided. Insufficient blinks leave the nonce
+    # so the person can finish the action. Success and bypass burn it.
     if req.challengeId:
-        ch = _ACTIVE_CHALLENGES.get(req.challengeId)
+        store = get_challenge_store()
+        ch = store.peek(req.challengeId)
         if not ch:
             return LivenessResponse(
                 status="FAILED",
@@ -105,8 +103,19 @@ def evaluate_liveness(req: LivenessRequest) -> LivenessResponse:
                 message=f"Challenge incomplete: observed {req.blinkCount} blinks, expected {ch['targetBlinks']}.",
             )
 
-        # Nonce burning: single-use token consumed upon successful verification
-        _ACTIVE_CHALLENGES.pop(req.challengeId, None)
+        burned = store.consume(req.challengeId, now=now)
+        if not burned.ok:
+            if burned.reason == "expired":
+                return LivenessResponse(
+                    status="FAILED",
+                    livenessScore=25.0,
+                    message="Challenge timed out. Please complete the action within the allotted time limit.",
+                )
+            return LivenessResponse(
+                status="FAILED",
+                livenessScore=20.0,
+                message="Challenge expired or invalid. Please request a new liveness challenge.",
+            )
 
     confidence = min(99.0, max(85.0, (1.0 - req.minEar) * 100.0))
     return LivenessResponse(

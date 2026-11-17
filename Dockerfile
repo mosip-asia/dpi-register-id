@@ -59,6 +59,23 @@ EXPOSE 8000
 CMD ["sleep", "infinity"]
 
 # ------------------------------------------------------------------------------
+# Citizen portal (Vite build served by the same app process)
+# ------------------------------------------------------------------------------
+FROM node:22-bookworm-slim AS web
+
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
+
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/tsconfig.json web/vite.config.ts web/index.html ./web/
+COPY web/src ./web/src
+COPY branding ./branding
+
+WORKDIR /app/web
+
+RUN pnpm install --frozen-lockfile && pnpm build
+
+# ------------------------------------------------------------------------------
 # Production Runner Stage (Lean, hardened production image)
 # ------------------------------------------------------------------------------
 FROM python:3.13-slim-bookworm AS runner
@@ -76,6 +93,7 @@ COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
 COPY --from=builder --chown=appuser:appgroup /app/src /app/src
 COPY --from=builder --chown=appuser:appgroup /app/django_manage.py /app/django_manage.py
 COPY --from=builder --chown=appuser:appgroup /app/pyproject.toml /app/pyproject.toml
+COPY --from=web --chown=appuser:appgroup /app/web/dist /app/web/dist
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/src:$PYTHONPATH"

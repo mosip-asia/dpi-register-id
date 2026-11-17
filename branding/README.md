@@ -1,6 +1,6 @@
 # register-id branding kit
 
-Reference kit for future interface work. Nothing in this folder is wired into the web app.
+The citizen portal imports `tokens.css`. `specimen.html` stays a reference page, not a route. Logo files are not stored here.
 
 The institute identity stays official. This kit records how **register-id** (Citizen Registration Gateway) sits beside it. Logo files are not stored here. Obtain them from the [AIT branding downloads](https://ait.ac.th/branding/) or the Office of Public Affairs, and follow the [logo manual (December 2023)](https://ait.ac.th/wp-content/uploads/2024/09/ait-logo-manual-dec2023.pdf).
 

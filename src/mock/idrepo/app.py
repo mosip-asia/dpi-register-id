@@ -4,6 +4,8 @@ FastAPI application for Mock MOSIP IDRepo REST API.
 Implements the official MOSIP specifications:
 - POST /idrepository/v1/identity/ (Standard MOSIP envelope + CBEFF XML document)
 - GET /idrepository/v1/identity/uin/{uin}
+- PATCH /idrepository/v1/identity/uin/{uin} (name, email, login-disabled flag)
+- DELETE /idrepository/v1/identity/uin/{uin}/biometrics
 - GET /idrepository/v1/identity/ (List/query identities)
 - GET /v1/idgenerator/uin (Sovereign UIN allocation)
 - POST /v1/authmanager/authenticate/clientidsecretkey
@@ -27,6 +29,76 @@ idrepo_app = FastAPI(title="MOSIP Identity Repository (Mock Service)")
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_RECORD_STATUSES = frozenset({"draft", "biometric"})
+
+
+def _full_name_value(full_name_raw) -> str:
+    if isinstance(full_name_raw, list) and len(full_name_raw) > 0:
+        return str(full_name_raw[0].get("value", ""))
+    if isinstance(full_name_raw, str):
+        return full_name_raw
+    return ""
+
+
+def _record_status(req: dict) -> str:
+    """Draft unless the caller explicitly passes biometric. ACTIVATED is not a record status."""
+    raw = req.get("recordStatus")
+    if raw is None or raw == "":
+        return "draft"
+    if raw not in _RECORD_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "id": "mosip.id.create",
+                "version": "v1",
+                "errors": [{
+                    "errorCode": "IDR-IDC-005",
+                    "message": "recordStatus must be 'draft' or 'biometric'",
+                }],
+            },
+        )
+    return raw
+
+
+def _not_found(uin: str, message: str | None = None) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "id": "mosip.id.read",
+            "version": "v1",
+            "response": None,
+            "errors": [{
+                "errorCode": "IDR-IDC-002",
+                "message": message or f"Identity record not found for UIN '{uin}'",
+            }],
+        },
+    )
+
+
+def _identity_payload(record: dict, include_biometrics: bool) -> tuple[dict, list]:
+    identity = {
+        "UIN": record["uin"],
+        "fullName": [{"language": "eng", "value": record["full_name"]}],
+        "email": record.get("email"),
+        "createdAt": str(record.get("created_at")),
+        "recordStatus": record.get("status") or "draft",
+        "loginDisabled": bool(record.get("login_disabled")),
+    }
+    documents: list = []
+    if not include_biometrics:
+        return identity, documents
+
+    identity["faceImage"] = record.get("face_image")
+    cbeff_xml = record.get("cbeff_xml")
+    if cbeff_xml:
+        cbeff_b64url = base64.urlsafe_b64encode(cbeff_xml.encode("utf-8")).decode("utf-8")
+        documents.append({
+            "category": "individualBiometrics",
+            "value": cbeff_b64url,
+        })
+    return identity, documents
 
 
 @idrepo_app.get("/health")
@@ -110,13 +182,8 @@ def add_identity(payload: dict):
         )
 
     # Extract full name (string or localized array [{"language":"eng", "value":"..."}])
-    full_name_raw = identity.get("fullName")
-    if isinstance(full_name_raw, list) and len(full_name_raw) > 0:
-        full_name = full_name_raw[0].get("value", "")
-    elif isinstance(full_name_raw, str):
-        full_name = full_name_raw
-    else:
-        full_name = "Unknown Citizen"
+    full_name = _full_name_value(identity.get("fullName")) or "Unknown Citizen"
+    record_status = _record_status(req)
 
     email = identity.get("email")
     face_image = identity.get("faceImage")
@@ -142,6 +209,7 @@ def add_identity(payload: dict):
         email=email,
         face_image=face_image,
         cbeff_xml=cbeff_xml,
+        status=record_status,
     )
 
     if saved and templates is not None:
@@ -180,38 +248,18 @@ def add_identity(payload: dict):
 
 
 @idrepo_app.get("/idrepository/v1/identity/uin/{uin}")
-def get_identity_by_uin(uin: str):
+def get_identity_by_uin(uin: str, includeBiometrics: bool = True):
     """
     MOSIP IDRepo GetIdentity endpoint.
-    Retrieves citizen demographics and CBEFF individualBiometrics.
+
+    includeBiometrics defaults to true so existing callers still receive the
+    stored face. The gateway client asks for false on an ordinary read.
     """
     record = storage.get_identity(uin)
     if not record:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "id": "mosip.id.read",
-                "version": "v1",
-                "response": None,
-                "errors": [
-                    {
-                        "errorCode": "IDR-IDC-002",
-                        "message": f"Identity record not found for UIN '{uin}'",
-                    }
-                ],
-            },
-        )
+        raise _not_found(uin)
 
-    # Format CBEFF as URL-safe base64
-    cbeff_xml = record.get("cbeff_xml")
-    documents = []
-    if cbeff_xml:
-        cbeff_b64url = base64.urlsafe_b64encode(cbeff_xml.encode("utf-8")).decode("utf-8")
-        documents.append({
-            "category": "individualBiometrics",
-            "value": cbeff_b64url,
-        })
-
+    identity, documents = _identity_payload(record, include_biometrics=includeBiometrics)
     return {
         "id": "mosip.id.read",
         "version": "v1",
@@ -219,15 +267,106 @@ def get_identity_by_uin(uin: str):
         "metadata": None,
         "response": {
             "status": "ACTIVATED",
-            "identity": {
-                "UIN": record["uin"],
-                "fullName": [{"language": "eng", "value": record["full_name"]}],
-                "email": record.get("email"),
-                "faceImage": record.get("face_image"),
-                "createdAt": str(record.get("created_at")),
-            },
+            "identity": identity,
             "documents": documents,
         },
+        "errors": None,
+    }
+
+
+@idrepo_app.patch("/idrepository/v1/identity/uin/{uin}")
+@idrepo_app.post("/idrepository/v1/identity/uin/{uin}")
+def update_identity(uin: str, payload: dict):
+    """
+    Correct demographics and/or the operator login-disabled flag.
+    Face bytes and templates are left in place.
+    """
+    if storage.get_identity(uin) is None:
+        raise _not_found(uin)
+
+    req = payload.get("request") or {}
+    if "identity" not in req and "loginDisabled" not in req:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "id": "mosip.id.update",
+                "version": "v1",
+                "errors": [{
+                    "errorCode": "IDR-IDC-006",
+                    "message": "request.identity or request.loginDisabled is required",
+                }],
+            },
+        )
+
+    if "identity" in req:
+        identity = req.get("identity") or {}
+        full_name = _full_name_value(identity.get("fullName"))
+        if not full_name.strip():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "id": "mosip.id.update",
+                    "version": "v1",
+                    "errors": [{
+                        "errorCode": "IDR-IDC-007",
+                        "message": "fullName is required",
+                    }],
+                },
+            )
+        saved = storage.update_demographics(
+            uin=str(uin),
+            full_name=full_name,
+            email=identity.get("email"),
+        )
+        if not saved:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "id": "mosip.id.update",
+                    "version": "v1",
+                    "errors": [{
+                        "errorCode": "IDR-IDC-500",
+                        "message": "Failed to update demographics",
+                    }],
+                },
+            )
+
+    if "loginDisabled" in req:
+        saved = storage.set_login_disabled(str(uin), bool(req.get("loginDisabled")))
+        if not saved:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "id": "mosip.id.update",
+                    "version": "v1",
+                    "errors": [{
+                        "errorCode": "IDR-IDC-500",
+                        "message": "Failed to update login-disabled flag",
+                    }],
+                },
+            )
+
+    return {
+        "id": "mosip.id.update",
+        "version": "v1",
+        "responsetime": _now_iso(),
+        "metadata": None,
+        "response": {"status": "SUCCESS", "entity": "identity"},
+        "errors": None,
+    }
+
+
+@idrepo_app.delete("/idrepository/v1/identity/uin/{uin}/biometrics")
+def delete_face(uin: str):
+    """Drop the face image, CBEFF XML, and face templates. Demographics remain."""
+    if not storage.delete_face(str(uin)):
+        raise _not_found(uin)
+    return {
+        "id": "mosip.id.update",
+        "version": "v1",
+        "responsetime": _now_iso(),
+        "metadata": None,
+        "response": {"status": "SUCCESS", "entity": "biometrics"},
         "errors": None,
     }
 
@@ -280,6 +419,8 @@ def list_identities(limit: int = 50):
                 "fullName": r["full_name"],
                 "email": r.get("email"),
                 "createdAt": str(r.get("created_at")),
+                "recordStatus": r.get("status") or "draft",
+                "loginDisabled": bool(r.get("login_disabled")),
             }
             for r in rows
         ],

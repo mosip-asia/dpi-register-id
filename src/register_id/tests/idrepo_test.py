@@ -26,7 +26,8 @@ def test_mock_idrepo_health():
 
 
 def test_idrepo_client_crud_flow():
-    client = IDRepoClient(enable_inprocess_fallback=True)
+    # Unreachable base URL so enroll lands in the in-process mock this file reads.
+    client = IDRepoClient(base_url="http://127.0.0.1:9", enable_inprocess_fallback=True)
 
     uin = client.generate_uin()
     assert len(uin) == 10
@@ -51,7 +52,7 @@ def test_idrepo_client_crud_flow():
     )
     assert success is True
 
-    identity = client.get_identity(uin)
+    identity = client.get_identity(uin, include_biometrics=True)
     assert identity is not None
     assert identity["uin"] == uin
     assert identity["full_name"] == "Somchai Jaidee"

@@ -11,6 +11,11 @@ import math
 
 from register_id.cbeff import extract_jpeg_bytes
 
+# Active engine: SHA-256 of JPEG bytes. Identical bytes collide.
+# A different photo of the same person does not. This is not face identification.
+ENGINE_NAME = "hash"
+CAN_IDENTIFY_FACE = False
+
 
 def embed_face_image(data_url_or_base64: str) -> list[float]:
     """
