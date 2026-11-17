@@ -116,10 +116,13 @@ def _templates_from_body(data: dict[str, Any]) -> list[dict[str, Any]]:
     rows = data.get("templates") or []
     parsed = []
     for row in rows:
-        parsed.append({
+        template = {
             "sector": row.get("sector"),
             "embedding": _parse_embedding(row.get("embedding")),
-        })
+        }
+        if row.get("engine"):
+            template["engine"] = row["engine"]
+        parsed.append(template)
     return parsed
 
 

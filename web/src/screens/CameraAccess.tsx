@@ -9,7 +9,12 @@ export function CameraAccess() {
       kicker="Camera"
       title="We need your camera"
       lede="Your browser will ask to use the camera. The camera is only used during the face check."
-      aside={<p>If the camera is blocked, check the address bar and choose Allow.</p>}
+      aside={
+        <>
+          <p>If the camera is blocked, check the address bar and choose Allow.</p>
+          <p>The first time, the browser downloads the face model, about 12 MB.</p>
+        </>
+      }
     >
       <div className="actions">
         <Link to="/enroll/capture" className="primary">

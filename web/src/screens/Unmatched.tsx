@@ -6,7 +6,7 @@ export function Unmatched() {
   const { lastMessage, attemptsLeft } = useFlow();
 
   return (
-    <Frame stepIndex={3} stepCount={3} kicker="Unmatched" title="The server did not confirm this photo">
+    <Frame stepIndex={3} stepCount={3} kicker="Unmatched" title="This face did not match the ID">
       <p>{lastMessage ?? "No face check has been sent from this browser."}</p>
       <p>Attempts left: {attemptsLeft}</p>
       <div className="actions">

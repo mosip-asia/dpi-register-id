@@ -1,73 +1,129 @@
+export const FACE_ENGINE = "face-api-128";
+export const FACE_MATCH_THRESHOLD = 0.5;
+
+export type FacePurpose = "enroll" | "check";
+
+export type FaceChallenge = {
+  challengeId: string;
+  purpose: FacePurpose;
+  expiresInSeconds: number;
+  requiredBlinks: number;
+  sectors: string[];
+};
+
+export type LivenessReport = {
+  challengeId: string;
+  engine: typeof FACE_ENGINE;
+  blinkCount: number;
+  sweepYaws: number[];
+};
+
 export type EnrollResult = {
   status: string;
   uin: string;
-  cbeffGenerated: boolean;
-  recordStatus?: string;
+  recordStatus: string;
+  faceEngine: string;
+  livenessSource: string;
+  templateCount: number;
+  message: string;
 };
 
-export type AuthResult = {
+export type VerifyResult = {
   status: string;
   verified: boolean;
   isFaceMatch: boolean;
   livenessPassed: boolean;
-  jwtToken: null;
+  compared: boolean;
+  euclideanDistance: number | null;
+  threshold: number | null;
+  matchScore: number | null;
   message: string | null;
-  sweepAccepted: boolean;
+  livenessSource: string | null;
+  jwtToken: null;
 };
 
-async function readError(response: Response) {
-  try {
-    const body = (await response.json()) as { detail?: string };
-    return body.detail || response.statusText;
-  } catch {
-    return response.statusText;
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
   }
+}
+
+type ErrorBody = { detail?: string | Array<{ msg?: string }> };
+
+async function readError(response: Response): Promise<ApiError> {
+  let message = response.statusText || `Request failed (${response.status})`;
+  try {
+    const { detail } = (await response.json()) as ErrorBody;
+    if (typeof detail === "string" && detail) message = detail;
+    else if (Array.isArray(detail)) {
+      const parts = detail.map((item) => item.msg).filter((msg): msg is string => Boolean(msg));
+      if (parts.length) message = parts.join("; ");
+    }
+  } catch {
+    // keep the status text
+  }
+  return new ApiError(response.status, message);
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await readError(response);
+  return (await response.json()) as T;
+}
+
+/** Element-wise mean of the scan's descriptors, sent as the single probe. */
+export function meanDescriptor(descriptors: readonly number[][]): number[] {
+  if (descriptors.length === 0) throw new Error("The scan has no face descriptors.");
+  const mean = new Array<number>(descriptors[0].length).fill(0);
+  for (const descriptor of descriptors) {
+    for (let i = 0; i < mean.length; i++) mean[i] += descriptor[i] ?? 0;
+  }
+  return mean.map((sum) => sum / descriptors.length);
+}
+
+export function getFaceChallenge(purpose: FacePurpose) {
+  return postJson<FaceChallenge>("/api/face/challenge", { purpose });
 }
 
 export async function issueUin() {
   const response = await fetch("/api/idgenerator/uin");
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) throw await readError(response);
   const body = (await response.json()) as { uin: string };
   return body.uin;
 }
 
-export async function enrollCitizen(input: {
+export function enrollCitizen(input: {
   uin: string;
   fullName: string;
   email: string;
   faceImage: string;
+  faceDescriptors: number[][];
+  liveness: LivenessReport;
 }) {
-  const response = await fetch("/api/enroll", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      uin: input.uin,
-      fullName: input.fullName,
-      email: input.email,
-      faceImage: input.faceImage,
-      consent: {
-        accepted: true,
-        purpose: "Create a citizen ID and store the face image for this registration",
-        acceptedAt: Date.now() / 1000,
-        language: "eng",
-      },
-    }),
+  return postJson<EnrollResult>("/api/enroll", {
+    uin: input.uin,
+    fullName: input.fullName,
+    email: input.email,
+    faceImage: input.faceImage,
+    consent: {
+      accepted: true,
+      purpose: "Create a citizen ID and store the face image for this registration",
+      acceptedAt: Date.now() / 1000,
+      language: "eng",
+    },
+    faceDescriptors: input.faceDescriptors,
+    liveness: input.liveness,
   });
-  if (!response.ok) throw new Error(await readError(response));
-  return (await response.json()) as EnrollResult;
 }
 
-export async function checkFace(input: { uin: string; liveImage: string }) {
-  const response = await fetch("/api/authenticate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      uin: input.uin,
-      liveImage: input.liveImage,
-      livenessScore: 0,
-      livenessPassed: false,
-    }),
-  });
-  if (!response.ok) throw new Error(await readError(response));
-  return (await response.json()) as AuthResult;
+export function verifyFace(input: { uin: string; probeDescriptor: number[]; liveness: LivenessReport }) {
+  return postJson<VerifyResult>("/api/authenticate", input);
 }

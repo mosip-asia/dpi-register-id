@@ -13,7 +13,7 @@ router = APIRouter()
 template_path = Path(__file__).parent.joinpath("templates")
 templates = Jinja2Templates(directory=template_path)
 _DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
-_SPA_PREFIXES = ("enroll", "prove", "id", "assets")
+_SPA_PREFIXES = ("enroll", "prove", "id", "assets", "models")
 
 
 def _spa_index() -> HTMLResponse | None:

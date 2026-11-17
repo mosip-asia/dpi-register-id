@@ -7,6 +7,10 @@ with automatic SQLite fallback for offline environments.
 Identity rows store demographics, record status, the login-disabled flag,
 the face image, and CBEFF only. Match vectors live in face_template
 (mosip_ida on PostgreSQL). The gateway reaches this store through HTTP.
+
+A template row carries sector, embedding, an optional engine name, and a slot
+(its position in the saved list), so one UIN can hold several rows for the
+same sector. A row saved without an engine reads back without one.
 """
 
 import json
@@ -52,6 +56,18 @@ def _normalize_identity(row: dict[str, Any]) -> dict[str, Any]:
 
 
 _RECORD_STATUSES = frozenset({"draft", "biometric"})
+
+_SQLITE_FACE_TEMPLATE_DDL = """
+    CREATE TABLE IF NOT EXISTS face_template (
+        uin TEXT NOT NULL,
+        sector TEXT NOT NULL,
+        slot INTEGER NOT NULL DEFAULT 0,
+        engine TEXT,
+        embedding TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (uin, sector, slot)
+    );
+"""
 
 
 class IDRepoStorage:
@@ -101,17 +117,50 @@ class IDRepoStorage:
                     );
                 """)
                 self._migrate_sqlite(conn)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS face_template (
-                        uin TEXT NOT NULL,
-                        sector TEXT NOT NULL,
-                        embedding TEXT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (uin, sector)
-                    );
-                """)
+                conn.execute(_SQLITE_FACE_TEMPLATE_DDL)
+                self._migrate_sqlite_templates(conn)
         finally:
             conn.close()
+
+    def _migrate_sqlite_templates(self, conn) -> None:
+        """Rebuild a pre-engine face_template whose key was (uin, sector)."""
+        info = conn.execute("PRAGMA table_info(face_template)").fetchall()
+        if "slot" in {row[1] for row in info}:
+            return
+        conn.execute("ALTER TABLE face_template RENAME TO face_template_legacy")
+        conn.execute(_SQLITE_FACE_TEMPLATE_DDL)
+        conn.execute("""
+            INSERT INTO face_template (uin, sector, slot, engine, embedding, created_at)
+            SELECT uin, sector, 0, NULL, embedding, created_at FROM face_template_legacy
+        """)
+        conn.execute("DROP TABLE face_template_legacy")
+
+    def _migrate_pg_templates(self, cur) -> None:
+        """Add engine and slot to a pre-engine table and widen its key to include slot."""
+        cur.execute("""
+            ALTER TABLE mosip_ida.face_template
+            ADD COLUMN IF NOT EXISTS slot INTEGER NOT NULL DEFAULT 0;
+        """)
+        cur.execute("""
+            ALTER TABLE mosip_ida.face_template
+            ADD COLUMN IF NOT EXISTS engine VARCHAR(32);
+        """)
+        cur.execute("""
+            SELECT tc.constraint_name, kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            WHERE tc.table_schema = 'mosip_ida'
+              AND tc.table_name = 'face_template'
+              AND tc.constraint_type = 'PRIMARY KEY';
+        """)
+        rows = cur.fetchall()
+        if {row[1] for row in rows} == {"uin", "sector", "slot"}:
+            return
+        for name in {row[0] for row in rows}:
+            cur.execute(f'ALTER TABLE mosip_ida.face_template DROP CONSTRAINT "{name}";')
+        cur.execute("ALTER TABLE mosip_ida.face_template ADD PRIMARY KEY (uin, sector, slot);")
 
     def _init_backend(self):
         # SQLite is always prepared so a Postgres miss or outage has a schema to fall back to.
@@ -147,11 +196,14 @@ class IDRepoStorage:
                         CREATE TABLE IF NOT EXISTS mosip_ida.face_template (
                             uin VARCHAR(32) NOT NULL,
                             sector VARCHAR(16) NOT NULL,
+                            slot INTEGER NOT NULL DEFAULT 0,
+                            engine VARCHAR(32),
                             embedding TEXT NOT NULL,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            PRIMARY KEY (uin, sector)
+                            PRIMARY KEY (uin, sector, slot)
                         );
                     """)
+                    self._migrate_pg_templates(cur)
                     conn.commit()
                 self.active_backend = "postgres"
                 logger.info("IDRepo storage initialized on PostgreSQL backend.")
@@ -408,10 +460,10 @@ class IDRepoStorage:
             conn.close()
 
     def save_face_templates(self, uin: str, templates: list[dict]) -> bool:
-        """Replace every stored sector for this UIN in one transaction."""
+        """Replace every stored template row for this UIN in one transaction."""
         rows = [
-            (uin, item["sector"], _embedding_text(item["embedding"]))
-            for item in templates
+            (uin, item["sector"], slot, item.get("engine"), _embedding_text(item["embedding"]))
+            for slot, item in enumerate(templates)
         ]
 
         if self.active_backend == "postgres":
@@ -424,8 +476,9 @@ class IDRepoStorage:
                             (uin,),
                         )
                         cur.executemany("""
-                            INSERT INTO mosip_ida.face_template (uin, sector, embedding)
-                            VALUES (%s, %s, %s)
+                            INSERT INTO mosip_ida.face_template
+                                (uin, sector, slot, engine, embedding)
+                            VALUES (%s, %s, %s, %s, %s)
                         """, rows)
                     conn.commit()
                     return True
@@ -440,8 +493,8 @@ class IDRepoStorage:
             with conn:
                 conn.execute("DELETE FROM face_template WHERE uin = ?", (uin,))
                 conn.executemany("""
-                    INSERT INTO face_template (uin, sector, embedding)
-                    VALUES (?, ?, ?)
+                    INSERT INTO face_template (uin, sector, slot, engine, embedding)
+                    VALUES (?, ?, ?, ?, ?)
                 """, rows)
             return True
         except Exception as e:
@@ -454,10 +507,13 @@ class IDRepoStorage:
         templates = []
         for row in rows:
             record = dict(row)
-            templates.append({
+            template = {
                 "sector": record["sector"],
                 "embedding": _coerce_embedding(record["embedding"]),
-            })
+            }
+            if record.get("engine"):
+                template["engine"] = record["engine"]
+            templates.append(template)
         return templates
 
     def get_face_templates(self, uin: str) -> list[dict[str, Any]]:
@@ -468,10 +524,10 @@ class IDRepoStorage:
                     from psycopg2.extras import RealDictCursor
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute("""
-                            SELECT sector, embedding
+                            SELECT sector, engine, embedding
                             FROM mosip_ida.face_template
                             WHERE uin = %s
-                            ORDER BY sector;
+                            ORDER BY sector, slot;
                         """, (uin,))
                         return self._rows_to_templates(cur.fetchall())
                 except Exception as e:
@@ -483,10 +539,10 @@ class IDRepoStorage:
         try:
             cur = conn.cursor()
             cur.execute("""
-                SELECT sector, embedding
+                SELECT sector, engine, embedding
                 FROM face_template
                 WHERE uin = ?
-                ORDER BY sector;
+                ORDER BY sector, slot;
             """, (uin,))
             return self._rows_to_templates(cur.fetchall())
         finally:

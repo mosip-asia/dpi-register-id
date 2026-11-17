@@ -18,10 +18,10 @@ export function Help() {
         <p>If the picture is dark, use a window or a lamp. Leave the flash off.</p>
         <div className="panel">
           <p>Common fixes</p>
-          <p>Use more light</p>
-          <p>Look straight at the camera</p>
-          <p>Hold still if the picture is blurry</p>
-          <p>Allow the camera in the address bar</p>
+          <p>Allow the camera in the address bar, then try again.</p>
+          <p>If the face check does not load, refresh the page. The model is about 12 MB.</p>
+          <p>If your face is not found, face a light and sit about an arm's length away.</p>
+          <p>If the head turn is missed, turn more slowly and a little further.</p>
         </div>
       </div>
       <div className="actions">

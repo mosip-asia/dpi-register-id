@@ -1,5 +1,12 @@
 import { createContext, useContext, useMemo, useState } from "react";
 
+export type FaceScan = {
+  descriptors: number[][];
+  blinkCount: number;
+  sweepYaws: number[];
+  challengeId: string;
+};
+
 export type FlowState = {
   fullName: string;
   gender: string;
@@ -8,11 +15,14 @@ export type FlowState = {
   consentAccepted: boolean;
   researchOptIn: boolean;
   photoDataUrl: string | null;
+  scan: FaceScan | null;
   uin: string | null;
   enrolled: boolean;
+  recordStatus: string | null;
   serviceName: string;
   attemptsLeft: number;
   lastMessage: string | null;
+  lastDistance: number | null;
   verified: boolean;
 };
 
@@ -24,11 +34,14 @@ const empty: FlowState = {
   consentAccepted: false,
   researchOptIn: false,
   photoDataUrl: null,
+  scan: null,
   uin: null,
   enrolled: false,
+  recordStatus: null,
   serviceName: "Sandbox service",
   attemptsLeft: 3,
   lastMessage: null,
+  lastDistance: null,
   verified: false,
 };
 

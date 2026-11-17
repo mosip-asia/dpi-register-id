@@ -1,93 +1,80 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { checkFace } from "../api";
+import { ApiError, getFaceChallenge, meanDescriptor, verifyFace, type FaceChallenge } from "../api";
+import type { ScanResult } from "../face/useFaceScan";
 import { useFlow } from "../flow";
 import { Frame } from "../ui";
 
-function stopStream(stream: MediaStream | null) {
-  stream?.getTracks().forEach((track) => track.stop());
-}
+const FaceScanner = lazy(() =>
+  import("../face/FaceScanner").then((mod) => ({ default: mod.FaceScanner })),
+);
 
 export function FaceCheck() {
   const navigate = useNavigate();
   const { uin, attemptsLeft, update } = useFlow();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [blocked, setBlocked] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [challenge, setChallenge] = useState<FaceChallenge | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [missingId, setMissingId] = useState(false);
+  const [round, setRound] = useState(0);
 
   useEffect(() => {
+    if (attemptsLeft === 0) return;
     let active = true;
-
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "user" } })
-      .then((stream) => {
-        if (!active) {
-          stopStream(stream);
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
+    setChallenge(null);
+    setError(null);
+    setMissingId(false);
+    getFaceChallenge("check")
+      .then((next) => {
+        if (active) setChallenge(next);
       })
-      .catch(() => {
-        if (active) setBlocked(true);
+      .catch((caught: unknown) => {
+        if (active) setError(caught instanceof Error ? caught.message : "The face check could not start.");
       });
-
     return () => {
       active = false;
-      stopStream(streamRef.current);
-      streamRef.current = null;
     };
-  }, []);
+  }, [attemptsLeft, round]);
 
-  async function onCheck() {
-    const video = videoRef.current;
-    if (busy) return;
-    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
-      setMessage("Wait until your face is in the picture, then check.");
-      return;
-    }
-    setMessage(null);
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      setMessage("The browser could not read the camera picture.");
-      return;
-    }
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const liveImage = canvas.toDataURL("image/jpeg", 0.8);
-    setBusy(true);
+  async function onDone(result: ScanResult) {
     try {
-      const result = await checkFace({ uin: uin ?? "", liveImage });
-      if (result.isFaceMatch) {
-        update({ verified: true, lastMessage: result.message });
+      const verdict = await verifyFace({
+        uin: uin ?? "",
+        probeDescriptor: meanDescriptor(result.descriptors),
+        liveness: {
+          challengeId: result.challengeId,
+          engine: result.engine,
+          blinkCount: result.blinkCount,
+          sweepYaws: result.sweepYaws,
+        },
+      });
+      if (verdict.isFaceMatch) {
+        update({
+          verified: true,
+          lastDistance: verdict.euclideanDistance,
+          lastMessage: verdict.message,
+        });
         navigate({ to: "/prove/verified" });
         return;
       }
-      const serverMessage = result.message ?? "The server did not confirm this photo.";
-      const notCompared =
-        !result.sweepAccepted ||
-        serverMessage.includes("Identity was not compared") ||
-        serverMessage.includes("Head sweep required") ||
-        serverMessage.includes("no face model");
-      if (notCompared) {
-        update({ verified: false, lastMessage: serverMessage });
-        setMessage(serverMessage);
+      if (verdict.compared) {
+        update({
+          verified: false,
+          lastDistance: verdict.euclideanDistance,
+          lastMessage: verdict.message,
+          attemptsLeft: Math.max(0, attemptsLeft - 1),
+        });
+        navigate({ to: "/prove/unmatched" });
         return;
       }
-      update({
-        verified: false,
-        lastMessage: serverMessage,
-        attemptsLeft: Math.max(0, attemptsLeft - 1),
-      });
-      navigate({ to: "/prove/unmatched" });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The face check could not be sent.");
-    } finally {
-      setBusy(false);
+      update({ verified: false, lastMessage: verdict.message });
+      setError(verdict.message ?? "The server did not compare this scan.");
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 404) {
+        setMissingId(true);
+        setError("No ID with that number.");
+        return;
+      }
+      setError(caught instanceof Error ? caught.message : "The face check could not be sent.");
     }
   }
 
@@ -96,26 +83,48 @@ export function FaceCheck() {
       stepIndex={3}
       stepCount={3}
       kicker="Face check"
-      title="Send a photo to the server"
-      aside={<p>The server decides the result. A still photo is not a face match.</p>}
+      title="Confirm it is you"
+      aside={<p>The server compares this scan with the face stored for the ID. The head turn is checked in this browser.</p>}
     >
-      {blocked ? (
-        <div className="note">
-          The camera is blocked. Allow it in the address bar.
-          <Link to="/enroll/help">Camera help</Link>
+      {attemptsLeft === 0 ? (
+        <div className="stack">
+          <p className="note">No attempts left. An officer can review the application.</p>
+          <div className="actions">
+            <Link to="/enroll/help" className="secondary">
+              Get help
+            </Link>
+          </div>
         </div>
       ) : (
-        <div className="stage">
-          <video className="video" autoPlay playsInline muted ref={videoRef} />
-          <div className="stage-guide" />
-        </div>
+        <>
+          {error ? <p className="note">{error}</p> : null}
+          {missingId ? (
+            <div className="actions">
+              <Link to="/prove/id" className="primary">
+                Enter the ID again
+              </Link>
+            </div>
+          ) : error ? (
+            <div className="actions">
+              <button type="button" className="primary" onClick={() => setRound((current) => current + 1)}>
+                Scan again
+              </button>
+            </div>
+          ) : challenge ? (
+            <Suspense fallback={<p>Getting the face check ready…</p>}>
+              <FaceScanner
+                key={challenge.challengeId}
+                mode="check"
+                challengeId={challenge.challengeId}
+                requiredBlinks={challenge.requiredBlinks}
+                onDone={(result) => void onDone(result)}
+              />
+            </Suspense>
+          ) : (
+            <p>Getting the face check ready…</p>
+          )}
+        </>
       )}
-      {message ? <p className="note">{message}</p> : null}
-      <div className="actions">
-        <button type="button" className="primary" disabled={busy || attemptsLeft === 0} onClick={() => void onCheck()}>
-          {busy ? "Checking…" : "Check"}
-        </button>
-      </div>
     </Frame>
   );
 }

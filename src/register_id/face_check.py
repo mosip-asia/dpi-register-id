@@ -1,10 +1,18 @@
 """
 Capture and probe gates for register-id.
 
-Identity matching is not implemented. The embedder that actually runs hashes
-JPEG bytes. It can report a duplicate payload. It cannot decide that two
-different photos are the same person, and no landmark model is loaded, so
-head turn and liveness are not measured from pixels.
+Two template engines exist:
+
+* ``hash``: the server-side embedder hashes JPEG bytes. It can report a
+  duplicate payload. It cannot decide that two different photos are the same
+  person, so ``compare_probe`` never reports a face match.
+* ``face-api-128``: 128-D descriptors computed in the browser by
+  @vladmandic/face-api. ``compare_descriptor`` compares them on the server by
+  Euclidean distance. The browser never decides the match.
+
+No landmark model runs on the server, so head turn and liveness are not
+measured from pixels on either path. On the descriptor path they are
+reported by the browser.
 """
 
 from __future__ import annotations
@@ -14,6 +22,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from register_id.embedder import ENGINE_NAME
+from register_id.face_descriptor import DESCRIPTOR_MATCH_THRESHOLD, FACE_DESCRIPTOR_ENGINE
+from register_id.matcher import match_gallery
 
 _NOT_A_FACE_ENGINE = frozenset({"", "hash"})
 
@@ -108,6 +118,40 @@ def compare_probe(
         threshold=None,
         engine="hash",
         duplicate_of_stored=duplicate,
+    )
+
+
+def compare_descriptor(
+    gallery: Sequence[Sequence[float]],
+    probe: Sequence[float],
+    threshold: float = DESCRIPTOR_MATCH_THRESHOLD,
+) -> MatchAssessment:
+    """Compare a browser descriptor with stored face-api-128 templates.
+
+    Distance is the minimum Euclidean distance to any gallery vector. A match
+    needs distance strictly below ``threshold``. An empty gallery is no match
+    and has no distance.
+    """
+    if not gallery:
+        return MatchAssessment(
+            is_face_match=False,
+            distance=None,
+            score=None,
+            threshold=threshold,
+            engine=FACE_DESCRIPTOR_ENGINE,
+            duplicate_of_stored=False,
+        )
+    probe_list = list(probe)
+    is_match, distance, score = match_gallery(
+        [list(vector) for vector in gallery], probe_list, threshold
+    )
+    return MatchAssessment(
+        is_face_match=is_match,
+        distance=distance,
+        score=score,
+        threshold=threshold,
+        engine=FACE_DESCRIPTOR_ENGINE,
+        duplicate_of_stored=any(_same_vector(stored, probe_list) for stored in gallery),
     )
 
 

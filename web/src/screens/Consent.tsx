@@ -22,12 +22,15 @@ export function Consent() {
       <div className="stack">
         <div className="panel">
           <strong>Why</strong>
-          <p>We store a face photo with the draft record. This build does not match that photo to a person.</p>
+          <p>
+            We store your photo and a face signature made in this browser. When you use the ID, a new scan is
+            compared with that signature on the server.
+          </p>
         </div>
         <div className="panel">
           <strong>Who sees it</strong>
           <p>
-            This service stores the photo. It does not send the photo, or a login token, to another service.
+            This service stores the photo and the face signature. Other services do not receive the photo.
           </p>
         </div>
         <label className="check">

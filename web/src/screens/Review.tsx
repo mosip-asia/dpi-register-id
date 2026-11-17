@@ -3,8 +3,8 @@ import { useFlow } from "../flow";
 import { Frame } from "../ui";
 
 export function Review() {
-  const { photoDataUrl, fullName, gender, dateOfBirth, email } = useFlow();
-  const canCreate = Boolean(photoDataUrl && fullName.trim() && email.trim());
+  const { photoDataUrl, scan, fullName, gender, dateOfBirth, email, update } = useFlow();
+  const canCreate = Boolean(photoDataUrl && scan && fullName.trim() && email.trim());
 
   return (
     <Frame stepIndex={6} stepCount={6} kicker="Review" title="Check before we create your ID">
@@ -14,9 +14,18 @@ export function Review() {
         ) : (
           <div className="panel">
             <p>No photo yet.</p>
-            <Link to="/enroll/capture">Take a photo</Link>
+            <Link to="/enroll/capture">Scan your face</Link>
           </div>
         )}
+        <p>
+          Face scan done: the head turn was checked in this browser.{" "}
+          <Link
+            to="/enroll/capture"
+            onClick={() => update({ scan: null, photoDataUrl: null })}
+          >
+            Scan again
+          </Link>
+        </p>
         <div className="facts">
           <p>
             <strong>Full name</strong> <span>{fullName}</span>

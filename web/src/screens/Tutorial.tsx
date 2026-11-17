@@ -8,7 +8,7 @@ export function Tutorial() {
       stepCount={6}
       kicker="Face check"
       title="How the face check works"
-      lede="You take one photo. The server stores it with the draft. It does not match a face."
+      lede="The scan takes about 20 seconds. The face model runs in this browser. At the end, your photo and a face signature go to the server."
       aside={
         <>
           <h2>Don't</h2>
@@ -16,6 +16,7 @@ export function Tutorial() {
             <li>No glasses</li>
             <li>No hat or mask</li>
             <li>No second screen</li>
+            <li>No one else in view</li>
           </ul>
         </>
       }
@@ -23,8 +24,9 @@ export function Tutorial() {
       <div className="panel">
         <strong>Do</strong>
         <ul>
-          <li>Good light</li>
-          <li>Face in the oval</li>
+          <li>Use good light</li>
+          <li>Put your face in the oval</li>
+          <li>Turn your head slowly to your left, then to your right</li>
           <li>Look at the camera</li>
         </ul>
       </div>

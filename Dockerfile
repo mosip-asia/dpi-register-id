@@ -69,6 +69,7 @@ RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
 
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/tsconfig.json web/vite.config.ts web/index.html ./web/
 COPY web/src ./web/src
+COPY web/scripts ./web/scripts
 COPY branding ./branding
 
 WORKDIR /app/web

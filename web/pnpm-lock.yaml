@@ -17,6 +17,9 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.139.3
         version: 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@vladmandic/face-api':
+        specifier: ^1.7.15
+        version: 1.7.15
       lucide-react:
         specifier: ^0.555.0
         version: 0.555.0(react@19.3.1)
@@ -507,6 +510,10 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       vite: ^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
+
+  '@vladmandic/face-api@1.7.15':
+    resolution: {integrity: sha512-WDMmK3CfNLo8jylWqMoQgf4nIst3M0fzx1dnac96wv/dvMTN4DxC/Pq1DGtduDk1lktCamQ3MIDXFnvrdHTXDw==}
+    engines: {node: '>=14.0.0'}
 
   baseline-browser-mapping@2.11.37:
     resolution: {integrity: sha512-QYph+vfurmaxhNwi9FprfmtkT5cx2Keg8FzZ0vnjO8ukscIybVyZGMFwdllKGlTI6qyU8ck43OM9UXh+IFJihQ==}
@@ -1120,6 +1127,8 @@ snapshots:
       vite: 7.3.8
     transitivePeerDependencies:
       - supports-color
+
+  '@vladmandic/face-api@1.7.15': {}
 
   baseline-browser-mapping@2.11.37: {}
 

@@ -1,64 +1,48 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { CircleHelp } from "lucide-react";
+import { getFaceChallenge, type FaceChallenge } from "../api";
+import type { ScanResult } from "../face/useFaceScan";
 import { useFlow } from "../flow";
 import { Frame } from "../ui";
 
-function stopStream(stream: MediaStream | null) {
-  stream?.getTracks().forEach((track) => track.stop());
-}
+const FaceScanner = lazy(() =>
+  import("../face/FaceScanner").then((mod) => ({ default: mod.FaceScanner })),
+);
 
 export function Capture() {
   const navigate = useNavigate();
-  const { attemptsLeft, update } = useFlow();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [blocked, setBlocked] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const { update } = useFlow();
+  const [challenge, setChallenge] = useState<FaceChallenge | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [round, setRound] = useState(0);
 
   useEffect(() => {
     let active = true;
-
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "user" } })
-      .then((stream) => {
-        if (!active) {
-          stopStream(stream);
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
+    setChallenge(null);
+    setError(null);
+    getFaceChallenge("enroll")
+      .then((next) => {
+        if (active) setChallenge(next);
       })
-      .catch(() => {
-        if (active) setBlocked(true);
+      .catch((caught: unknown) => {
+        if (active) setError(caught instanceof Error ? caught.message : "The face check could not start.");
       });
-
     return () => {
       active = false;
-      stopStream(streamRef.current);
-      streamRef.current = null;
     };
-  }, []);
+  }, [round]);
 
-  function usePhoto() {
-    const video = videoRef.current;
-    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
-      setMessage("Wait until your face is in the picture, then take the photo.");
-      return;
-    }
-    setMessage(null);
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      setMessage("The browser could not read the camera picture.");
-      return;
-    }
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    update({ photoDataUrl: canvas.toDataURL("image/jpeg", 0.8) });
-    stopStream(streamRef.current);
-    streamRef.current = null;
+  function onDone(result: ScanResult) {
+    update({
+      photoDataUrl: result.photoDataUrl,
+      scan: {
+        descriptors: result.descriptors,
+        blinkCount: result.blinkCount,
+        sweepYaws: result.sweepYaws,
+        challengeId: result.challengeId,
+      },
+    });
     navigate({ to: "/enroll/review" });
   }
 
@@ -67,10 +51,10 @@ export function Capture() {
       stepIndex={6}
       stepCount={6}
       kicker="Photo"
-      title="Take a photo"
+      title="Scan your face"
       aside={
         <>
-          <p>One photo is stored with the draft. Attempts left for a later face check: {attemptsLeft}.</p>
+          <p>This browser checks a slow head turn from left to right. The server stores the photo and the face signature.</p>
           <span className="inline-icon">
             <CircleHelp size={20} strokeWidth={1.75} aria-hidden />
             <Link to="/enroll/help">Need help?</Link>
@@ -78,23 +62,28 @@ export function Capture() {
         </>
       }
     >
-      {blocked ? (
-        <div className="note">
-          The camera is blocked. Allow it in the address bar.
-          <Link to="/enroll/help">Camera help</Link>
-        </div>
+      {error ? (
+        <>
+          <p className="note">{error}</p>
+          <div className="actions">
+            <button type="button" className="primary" onClick={() => setRound((current) => current + 1)}>
+              Try again
+            </button>
+          </div>
+        </>
+      ) : challenge ? (
+        <Suspense fallback={<p>Getting the face check ready…</p>}>
+          <FaceScanner
+            key={challenge.challengeId}
+            mode="enroll"
+            challengeId={challenge.challengeId}
+            requiredBlinks={challenge.requiredBlinks}
+            onDone={onDone}
+          />
+        </Suspense>
       ) : (
-        <div className="stage">
-          <video className="video" autoPlay playsInline muted ref={videoRef} />
-          <div className="stage-guide" />
-        </div>
+        <p>Getting the face check ready…</p>
       )}
-      {message ? <p className="note">{message}</p> : null}
-      <div className="actions">
-        <button type="button" className="primary" onClick={usePhoto}>
-          Use this photo
-        </button>
-      </div>
     </Frame>
   );
 }

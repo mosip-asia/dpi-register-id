@@ -5,9 +5,10 @@ from register_id.oidc_routes import router as oidc_router
 
 app = FastAPI(title="DPI Citizen Registration Gateway (register-id)")
 
-app.include_router(web_router)
 app.include_router(register_id_router)
 app.include_router(oidc_router)
+# Last: web_router ends with a GET catch-all that would shadow /api routes.
+app.include_router(web_router)
 
 import uvicorn
 from typer import Typer

@@ -3,18 +3,39 @@ FastAPI REST API Router for the register_id submodule.
 
 Exposes endpoints for citizen enrollment, ISO 30107-3 PAD liveness,
 1:1 biometric matching, and registry listing.
+
+Two enrollment and check paths exist. The image path hashes JPEG bytes and
+never reports a face match. The descriptor path takes face-api-128
+descriptors from the browser with browser-reported liveness bound to a
+single-use challenge, and compares descriptors on the server.
 """
 
 import logging
 import math
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from register_id.access import CUSTODIAN_ROLES, DEMOGRAPHIC_ROLES, require_role
 from register_id.audit import list_events, record_event
 from register_id.cbeff import build_cbeff_xml, extract_jpeg_bytes
-from register_id.embedder import embed_face_image
-from register_id.face_check import assess_capture, compare_probe, may_store_biometric_record
+from register_id.embedder import ENGINE_NAME, embed_face_image
+from register_id.face_check import (
+    assess_capture,
+    compare_descriptor,
+    compare_probe,
+    may_store_biometric_record,
+)
+from register_id.face_descriptor import (
+    DESCRIPTOR_LENGTH,
+    DESCRIPTOR_MATCH_THRESHOLD,
+    FACE_DESCRIPTOR_ENGINE,
+    assess_client_liveness,
+    create_face_challenge,
+    descriptors_consistent,
+    validate_descriptor,
+)
 from register_id.idrepo import get_idrepo_client
+from register_id.idrepo_client import IDRepoClient
 from register_id.keycloak import get_keycloak_client
 from register_id.liveness import create_liveness_challenge, evaluate_liveness
 from register_id.models import (
@@ -25,6 +46,8 @@ from register_id.models import (
     CredentialResponse,
     DemographicsUpdate,
     EnrollRequest,
+    FaceChallenge,
+    FaceChallengeRequest,
     LivenessChallenge,
     LivenessRequest,
     LivenessResponse,
@@ -100,6 +123,16 @@ def create_sweep_challenge_endpoint():
     Issues a single-use head-sweep challenge. Blink score is not part of verification.
     """
     return create_sweep_challenge()
+
+
+@router.post("/face/challenge", response_model=FaceChallenge)
+def create_face_challenge_endpoint(req: FaceChallengeRequest):
+    """
+    Issues a single-use challenge for the browser descriptor path.
+
+    The browser binds its head-sweep report to this id. A blink is not required.
+    """
+    return create_face_challenge(req.purpose)
 
 
 def _require_operator(authorization: str | None, allowed: frozenset[str]) -> str:
@@ -236,33 +269,13 @@ def check_liveness_endpoint(req: LivenessRequest):
     return evaluate_liveness(req)
 
 
-@router.post("/enroll")
-def enroll_citizen_endpoint(req: EnrollRequest):
-    """
-    Enrolls a citizen face through the MOSIP IDRepo REST interface:
-    1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
-    2. Computes 128-D templates from the image bytes. Client vectors are rejected.
-    3. Persists demographics on the identity and templates on the IDA table.
-
-    Keycloak login is a separate POST /api/credentials call. No password is accepted here.
-    """
-    idrepo = get_idrepo_client()
-
-    try:
-        jpeg_bytes = extract_jpeg_bytes(req.faceImage)
-        cbeff_xml = build_cbeff_xml(uin=req.uin, jpeg_bytes=jpeg_bytes)
-    except Exception:
-        _audit("enroll", "citizen", req.uin, "failure", "image packaging failed")
-        raise HTTPException(
-            status_code=422,
-            detail="Image could not be packaged. Nothing was stored.",
-        )
-
-    # The hash templates are a duplicate-byte check on a draft. They are not a
-    # biometric of record: presentation has not passed and the engine cannot
-    # identify a face, so status stays draft.
-    record_status = "biometric" if may_store_biometric_record(False, False) else "draft"
-    templates = _templates_for_enrollment(req)
+def _store_identity(
+    idrepo: IDRepoClient,
+    req: EnrollRequest,
+    cbeff_xml: str,
+    templates: list[dict],
+    record_status: str,
+) -> None:
     saved = idrepo.add_identity(
         uin=req.uin,
         full_name=req.fullName,
@@ -281,14 +294,119 @@ def enroll_citizen_endpoint(req: EnrollRequest):
             detail=f"MOSIP IDRepo enrollment failed: {error_msg}",
         )
 
+
+def _consent_note(req: EnrollRequest) -> str:
     purpose = " ".join(req.consent.purpose.split())[:80]
+    return f"consent {req.consent.language} at {int(req.consent.acceptedAt)}; {purpose}"
+
+
+def _reject_enroll(uin: str, message: str) -> HTTPException:
+    _audit("enroll", "citizen", uin, "failure", message[:240])
+    return HTTPException(status_code=422, detail=message)
+
+
+def _enroll_with_descriptors(req: EnrollRequest, idrepo: IDRepoClient, cbeff_xml: str) -> dict:
+    """
+    Store face-api-128 descriptors after the browser liveness report passes.
+
+    Liveness is reported by the browser, not measured here. Every check runs
+    before the IDRepo write, so a rejection stores nothing.
+    """
+    assert req.faceDescriptors is not None and req.liveness is not None
+    try:
+        descriptors = [
+            validate_descriptor(values, f"Face descriptor {index}")
+            for index, values in enumerate(req.faceDescriptors, start=1)
+        ]
+        hash_vector = embed_face_image(req.faceImage)
+    except ValueError as exc:
+        raise _reject_enroll(req.uin, str(exc)) from exc
+
+    liveness = assess_client_liveness(req.liveness, "enroll")
+    if not liveness.ok:
+        raise _reject_enroll(req.uin, liveness.message)
+
+    if not descriptors_consistent(descriptors):
+        raise _reject_enroll(
+            req.uin, "The captured frames do not look like the same face. Scan again."
+        )
+
+    record_status = (
+        "biometric"
+        if may_store_biometric_record(liveness.ok, engine_can_identify=True)
+        else "draft"
+    )
+    templates = [
+        {"sector": "front", "embedding": descriptor, "engine": FACE_DESCRIPTOR_ENGINE}
+        for descriptor in descriptors
+    ]
+    templates.append({"sector": "front", "embedding": hash_vector, "engine": ENGINE_NAME})
+    _store_identity(idrepo, req, cbeff_xml, templates, record_status)
+
     _audit(
         "enroll",
         "citizen",
         req.uin,
         "success",
-        f"draft stored; consent {req.consent.language} at {int(req.consent.acceptedAt)}; {purpose}",
+        (
+            f"{record_status} stored; {len(descriptors)} {FACE_DESCRIPTOR_ENGINE} templates; "
+            f"liveness reported by browser, not measured by server; {_consent_note(req)}"
+        )[:240],
     )
+    return {
+        "status": "SUCCESS",
+        "message": (
+            "Citizen face stored with browser face descriptors via MOSIP IDRepo interface. "
+            "Liveness was reported by the browser, not measured by the server."
+        ),
+        "uin": req.uin,
+        "fullName": req.fullName,
+        "backend": "mosip-idrepo-rest",
+        "cbeffGenerated": True,
+        "recordStatus": record_status,
+        "faceEngine": FACE_DESCRIPTOR_ENGINE,
+        "livenessSource": liveness.source,
+        "templateCount": len(descriptors),
+    }
+
+
+@router.post("/enroll")
+def enroll_citizen_endpoint(req: EnrollRequest):
+    """
+    Enrolls a citizen face through the MOSIP IDRepo REST interface:
+    1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
+    2. Without faceDescriptors: computes hash templates from the image bytes
+       and stores a draft.
+       With faceDescriptors and liveness: checks the browser liveness report
+       against its challenge, stores face-api-128 descriptors as templates,
+       and marks the record biometric.
+    3. Persists demographics on the identity and templates on the IDA table.
+
+    Keycloak login is a separate POST /api/credentials call. No password is accepted here.
+    """
+    idrepo = get_idrepo_client()
+
+    try:
+        jpeg_bytes = extract_jpeg_bytes(req.faceImage)
+        cbeff_xml = build_cbeff_xml(uin=req.uin, jpeg_bytes=jpeg_bytes)
+    except Exception:
+        _audit("enroll", "citizen", req.uin, "failure", "image packaging failed")
+        raise HTTPException(
+            status_code=422,
+            detail="Image could not be packaged. Nothing was stored.",
+        )
+
+    if req.faceDescriptors is not None:
+        return _enroll_with_descriptors(req, idrepo, cbeff_xml)
+
+    # The hash templates are a duplicate-byte check on a draft. They are not a
+    # biometric of record: presentation has not passed and the engine cannot
+    # identify a face, so status stays draft.
+    record_status = "biometric" if may_store_biometric_record(False, False) else "draft"
+    templates = _templates_for_enrollment(req)
+    _store_identity(idrepo, req, cbeff_xml, templates, record_status)
+
+    _audit("enroll", "citizen", req.uin, "success", f"draft stored; {_consent_note(req)}")
     return {
         "status": "SUCCESS",
         "message": "Citizen face stored as a draft via MOSIP IDRepo interface",
@@ -330,19 +448,126 @@ def issue_credentials_endpoint(req: CredentialRequest):
     )
 
 
+_NO_DESCRIPTOR_TEMPLATE = (
+    "This ID has no face template from the browser model. Enroll again in the portal."
+)
+
+
+def _authenticate_with_descriptor(
+    req: AuthRequest,
+    idrepo: IDRepoClient,
+    citizen: dict,
+) -> AuthResponse:
+    """
+    Compare a browser descriptor with stored face-api-128 templates.
+
+    The browser reports liveness and sends the descriptor. The server checks
+    the report against its challenge and decides the match from distance.
+    """
+    assert req.probeDescriptor is not None and req.liveness is not None
+    try:
+        probe = validate_descriptor(req.probeDescriptor, "Probe descriptor")
+    except ValueError as exc:
+        _audit("authenticate", "citizen", req.uin, "failure", str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    common: dict[str, Any] = {
+        "citizen": {"uin": citizen["uin"]},
+        "jwtToken": None,
+        "livenessScore": None,
+        "yawSource": "client",
+        "livenessSource": "client",
+    }
+
+    liveness = assess_client_liveness(req.liveness, "check")
+    if not liveness.ok:
+        _audit("authenticate", "citizen", req.uin, "failure", liveness.message[:240])
+        return AuthResponse(
+            status="FAILED",
+            verified=False,
+            isFaceMatch=False,
+            livenessPassed=False,
+            compared=False,
+            sweepAccepted=False,
+            message=liveness.message,
+            **common,
+        )
+
+    gallery = [
+        row["embedding"]
+        for row in idrepo.get_face_templates(req.uin)
+        if row.get("engine") == FACE_DESCRIPTOR_ENGINE
+        and isinstance(row.get("embedding"), list)
+        and len(row["embedding"]) == DESCRIPTOR_LENGTH
+    ]
+    if not gallery:
+        _audit(
+            "authenticate", "citizen", req.uin, "failure",
+            f"no {FACE_DESCRIPTOR_ENGINE} template stored",
+        )
+        return AuthResponse(
+            status="FAILED",
+            verified=False,
+            isFaceMatch=False,
+            livenessPassed=True,
+            compared=False,
+            sweepAccepted=True,
+            threshold=DESCRIPTOR_MATCH_THRESHOLD,
+            message=_NO_DESCRIPTOR_TEMPLATE,
+            **common,
+        )
+
+    match = compare_descriptor(gallery, probe, DESCRIPTOR_MATCH_THRESHOLD)
+    assert match.distance is not None
+    verdict = "is below" if match.is_face_match else "is not below"
+    message = (
+        f"Face {'matched' if match.is_face_match else 'did not match'} on the server: "
+        f"distance {match.distance:.4f} {verdict} {DESCRIPTOR_MATCH_THRESHOLD}. "
+        "Liveness was reported by the browser."
+    )
+    _audit(
+        "authenticate",
+        "citizen",
+        req.uin,
+        "success" if match.is_face_match else "failure",
+        f"{FACE_DESCRIPTOR_ENGINE} {'match' if match.is_face_match else 'no match'} "
+        f"at distance {match.distance:.4f}; liveness reported by browser",
+    )
+    return AuthResponse(
+        status="SUCCESS" if match.is_face_match else "FAILED",
+        verified=match.is_face_match,
+        isFaceMatch=match.is_face_match,
+        livenessPassed=True,
+        compared=True,
+        sweepAccepted=True,
+        euclideanDistance=match.distance,
+        matchScore=match.score,
+        threshold=match.threshold,
+        message=message,
+        **common,
+    )
+
+
 @router.post("/authenticate", response_model=AuthResponse)
 def authenticate_citizen_endpoint(req: AuthRequest):
     """
-    Verify a five-pose head sweep bound to an expiring challenge.
+    Verify a citizen against stored templates.
 
-    Blink flags on the request are ignored. The hash embedder is not a face
-    model, so a passing sweep is a submission check, not an identity match
-    and not proof of a live head turn.
+    With probeDescriptor: browser-reported liveness bound to a face challenge,
+    then a server-side face-api-128 distance comparison.
+
+    Without it: a five-pose head sweep bound to an expiring challenge. Blink
+    flags on the request are ignored. The hash embedder is not a face model,
+    so a passing sweep is a submission check, not an identity match and not
+    proof of a live head turn.
     """
     idrepo = get_idrepo_client()
     citizen = idrepo.get_identity(req.uin)
     if not citizen:
         raise HTTPException(status_code=404, detail=f"Citizen UIN '{req.uin}' not found in registry.")
+
+    if req.probeDescriptor is not None:
+        return _authenticate_with_descriptor(req, idrepo, citizen)
 
     assessment = assess_sweep(req.challengeId, req.liveViews)
     verified = assessment.accepted
@@ -359,7 +584,11 @@ def authenticate_citizen_endpoint(req: AuthRequest):
         try:
             probe_vector = embed_face_image(probe_image)
             stored_rows = idrepo.get_face_templates(req.uin)
-            stored_vectors = [row["embedding"] for row in stored_rows if "embedding" in row]
+            stored_vectors = [
+                row["embedding"]
+                for row in stored_rows
+                if "embedding" in row and row.get("engine", ENGINE_NAME) == ENGINE_NAME
+            ]
             match = compare_probe(stored_vectors, probe_vector)
         except ValueError:
             match = compare_probe([], [])

@@ -161,7 +161,7 @@ def add_identity(payload: dict):
          "registrationId": "...",
          "status": "ACTIVATED",
          "identity": { "UIN": "...", "fullName": [...], "email": "...", "faceImage": "..." },
-         "templates": [ { "sector": "front", "embedding": [0.1, "..."] } ],
+         "templates": [ { "sector": "front", "embedding": [0.1, "..."], "engine": "face-api-128" } ],
          "documents": [ { "category": "individualBiometrics", "value": "base64url..." } ]
       }
     }
@@ -394,12 +394,14 @@ def get_face_templates(uin: str):
             },
         )
 
-    return {
-        "templates": [
-            {"sector": item["sector"], "embedding": item["embedding"]}
-            for item in templates
-        ]
-    }
+    return {"templates": [_template_payload(item) for item in templates]}
+
+
+def _template_payload(item: dict) -> dict:
+    payload = {"sector": item["sector"], "embedding": item["embedding"]}
+    if item.get("engine"):
+        payload["engine"] = item["engine"]
+    return payload
 
 
 @idrepo_app.get("/idrepository/v1/identity/")

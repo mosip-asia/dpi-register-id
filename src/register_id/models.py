@@ -2,7 +2,7 @@
 Pydantic data models for the register_id submodule.
 """
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -94,6 +94,35 @@ def validate_face_views(views: list[FaceViewSample] | None) -> list[FaceViewSamp
     return views
 
 
+class FaceChallengeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    purpose: Literal["enroll", "check"]
+
+
+class FaceChallenge(BaseModel):
+    challengeId: str
+    purpose: Literal["enroll", "check"]
+    expiresInSeconds: int
+    requiredBlinks: int
+    sectors: list[str] = Field(default_factory=lambda: list(FACE_VIEW_SECTORS))
+
+
+SweepYaw = Annotated[float, Field(ge=-1.5, le=1.5, allow_inf_nan=False)]
+
+
+class ClientLiveness(BaseModel):
+    """Liveness evidence as reported by the browser. The server did not measure it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    challengeId: str = Field(..., min_length=1, max_length=64)
+    engine: Literal["face-api-128"]
+    blinkCount: int = Field(..., ge=0, le=50)
+    # Order: far-left, left, front, right, far-right.
+    sweepYaws: list[SweepYaw] = Field(..., min_length=5, max_length=5)
+
+
 class EnrollRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -102,11 +131,17 @@ class EnrollRequest(BaseModel):
     email: str = Field(..., max_length=128, description="Citizen email address")
     faceImage: str = Field(..., description="Base64-encoded face image (JPEG/PNG data URL)")
     faceViews: list[FaceViewSample] | None = None
+    faceDescriptors: list[list[float]] | None = Field(default=None, min_length=1, max_length=5)
+    liveness: ClientLiveness | None = None
     consent: ConsentRecord
 
     @model_validator(mode="after")
     def _validate_face_views(self) -> "EnrollRequest":
         validate_face_views(self.faceViews)
+        if (self.faceDescriptors is None) != (self.liveness is None):
+            raise ValueError("faceDescriptors and liveness must be sent together")
+        if self.faceDescriptors is not None and self.faceViews is not None:
+            raise ValueError("faceViews cannot be combined with faceDescriptors")
         self.consent = validate_consent(self.consent)
         return self
 
@@ -119,14 +154,29 @@ class AuthRequest(BaseModel):
         default=None,
         description="Live probe face image (data URL or base64)",
     )
-    livenessScore: float = Field(..., ge=0.0, le=100.0, description="Unused blink score; ignored")
-    livenessPassed: bool = Field(..., description="Unused blink flag; ignored")
+    # Required on the image path. Optional on the descriptor path. Ignored on both.
+    livenessScore: float | None = Field(
+        default=None, ge=0.0, le=100.0, description="Unused blink score; ignored"
+    )
+    livenessPassed: bool | None = Field(default=None, description="Unused blink flag; ignored")
     challengeId: str | None = Field(default=None, description="Single-use head-sweep challenge")
     liveViews: list[FaceViewSample] | None = None
+    probeDescriptor: list[float] | None = None
+    liveness: ClientLiveness | None = None
 
     @model_validator(mode="after")
     def _validate_live_views(self) -> "AuthRequest":
         validate_face_views(self.liveViews)
+        if self.probeDescriptor is not None:
+            if self.liveness is None:
+                raise ValueError("liveness is required with probeDescriptor")
+            return self
+        if self.liveness is not None:
+            raise ValueError("liveness is only accepted with probeDescriptor")
+        if self.livenessScore is None:
+            raise ValueError("livenessScore is required")
+        if self.livenessPassed is None:
+            raise ValueError("livenessPassed is required")
         has_image = bool(self.liveImage and self.liveImage.strip())
         if not has_image and not self.liveViews:
             raise ValueError("liveImage or liveViews is required")
@@ -160,6 +210,8 @@ class AuthResponse(BaseModel):
     message: str | None = None
     sweepAccepted: bool = False
     yawSource: str | None = None
+    compared: bool = False
+    livenessSource: str | None = None
 
 
 class DemographicsUpdate(BaseModel):

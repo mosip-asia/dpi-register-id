@@ -215,6 +215,7 @@ __marimo__/
 data/*
 !data/example.csv
 models/*
+web/public/models/
 .env
 .env.*
 !.env.example

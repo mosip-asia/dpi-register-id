@@ -40,3 +40,51 @@ The ready screen shows the number only after `POST /api/enroll` succeeds. A type
 - `GET /api/login/start` begins authorization-code PKCE. The callback stores the token in an HttpOnly cookie. Session and logout do not return that token to the page. The Jinja lab and the portal do not call this route.
 
 Compose passes the OIDC client settings, the cookie flag, and the operator token from `.env`. Copy `.env.example` to `.env` before the next `docker compose up`. An empty operator token denies the operator routes.
+
+## Browser face match
+
+`feat: match portal face scans and record descriptor templates` adds a face match on the citizen portal. `/lab` is unchanged and still runs its own experiment. The hash embedder is unchanged and still cannot identify a face.
+
+### What the browser does
+
+The portal loads `@vladmandic/face-api` 1.7.15 only when a scan starts. Weights are copied from the package into `web/public/models/` at build time and served at `/models/`. The nets are SSD MobileNet (detection), the 68-point landmark model, and the 128-D recognition model. About 12 MB the first time.
+
+The scan asks for one face in the oval, then a slow turn from the person's left to their right, then a look back at the camera. It keeps one yaw sample in each of five sectors (`far-left`, `left`, `front`, `right`, `far-right`). Enrollment keeps three descriptors from the frontal frames. A check keeps two and sends their element-wise mean as the probe. A JPEG of the most frontal frame is the stored photo.
+
+A blink is not required. The landmark model was not reliable enough to count one. `requiredBlinks` on the face challenge is `0`, and the scan skips that step. The head sweep is the liveness check. The server does not measure the turn from the pixels. It accepts the browser's five yaw numbers when they step left to right by at least `0.08` and the far-left to far-right span is at least `0.50`.
+
+### What the server does
+
+`POST /api/face/challenge` with `{"purpose": "enroll"}` or `"check"` returns a single-use id. Enroll challenges last 600 seconds. Check challenges last 120. The id is stored in the same challenge store as the sweep: Redis when `REDIS_URL` is set, memory otherwise.
+
+`POST /api/enroll` still requires the photo and consent. With `faceDescriptors` and `liveness` together, it checks the challenge, the sweep, and that the frames are within Euclidean `0.6` of each other. It then stores one `face-api-128` template per descriptor, all with sector `front`, plus the existing hash template of the JPEG. `recordStatus` is `biometric`. The response says liveness was reported by the browser. Sending only one of the two new fields is a 422, and nothing is stored. Without descriptors, enroll stays the old hash draft and `isFaceMatch` stays false.
+
+`POST /api/authenticate` with `probeDescriptor` and `liveness` compares the probe with stored `face-api-128` rows. `isFaceMatch` is true when the closest Euclidean distance is under `0.5`. `compared` is false when the sweep was rejected or the ID has no browser template. A mismatch spends an attempt in the portal. A rejected sweep does not. `jwtToken` stays null. Descriptors are not written to audit, operator reads, or responses.
+
+There is no duplicate-face search across the registry. Listing identities is capped, and templates are fetched one UIN at a time. Re-enrolling the same UIN replaces that UIN's template rows.
+
+### Database
+
+Only `mosip_ida.face_template` changes. `mosip_idrepo.citizen_identity` is unchanged.
+
+The old key was `(uin, sector)`, so a person could have one row per pose. The portal stores several frontal descriptors plus one hash row, and those rows would collide.
+
+`db/init-idrepo.sql` now creates:
+
+| Column | Type | Notes |
+|---|---|---|
+| `uin` | `VARCHAR(32)` | Not unique on its own |
+| `sector` | `VARCHAR(16)` | `front` for every portal descriptor and the hash row |
+| `slot` | `INTEGER NOT NULL DEFAULT 0` | Position in the list saved for that UIN |
+| `engine` | `VARCHAR(32)` NULL | `face-api-128` or `hash`. NULL on rows written before engines were recorded |
+| `embedding` | `TEXT` | JSON list of 128 floats |
+| `created_at` | `TIMESTAMP` | Default `CURRENT_TIMESTAMP` |
+
+Primary key: `(uin, sector, slot)`.
+
+A fresh Postgres volume runs `db/init-idrepo.sql` once. A volume created by the old script does not run it again. The mock IDRepo applies the same change on startup:
+
+- Postgres: `ADD COLUMN IF NOT EXISTS slot` and `engine`, drop the old primary key, add `PRIMARY KEY (uin, sector, slot)`. Existing rows stay. Their `slot` becomes `0` and `engine` stays null.
+- SQLite fallback: rename `face_template` to `face_template_legacy`, create the new table, copy each old row with `slot` `0` and `engine` NULL, then drop the legacy table.
+
+Saving templates for a UIN deletes that UIN's rows and inserts the new list. Slot `0` is the first descriptor. The hash row is another slot with sector `front`. Reads order by `sector`, then `slot`. A row with no engine is returned without an `engine` field, so older exact-match checks still hold.

@@ -59,6 +59,17 @@ function afterDetails(Screen: () => ReactNode) {
   };
 }
 
+function afterScan(Screen: () => ReactNode, { allowEnrolled = false } = {}) {
+  return afterDetails(function ScannedStep() {
+    const flow = useFlow();
+    const scanned = Boolean(flow.photoDataUrl && flow.scan);
+    // Ready keeps showing the new ID after enrollment clears the face data.
+    const issued = allowEnrolled && flow.enrolled && Boolean(flow.uin);
+    if (!scanned && !issued) return <Navigate to="/enroll/capture" />;
+    return <Screen />;
+  });
+}
+
 function ProveCheck() {
   const { uin } = useFlow();
   if (!(uin ?? "").trim()) return <Navigate to="/prove/id" />;
@@ -74,9 +85,9 @@ const routeTree = rootRoute.addChildren([
   route("/enroll/capture", afterDetails(Capture)),
   route("/enroll/help", Help),
   route("/enroll/paused", Paused),
-  route("/enroll/review", afterDetails(Review)),
+  route("/enroll/review", afterScan(Review)),
   route("/enroll/fix", afterDetails(FixDetail)),
-  route("/enroll/ready", afterDetails(Ready)),
+  route("/enroll/ready", afterScan(Ready, { allowEnrolled: true })),
   route("/prove", ServiceAsks),
   route("/prove/id", YourId),
   route("/prove/check", ProveCheck),

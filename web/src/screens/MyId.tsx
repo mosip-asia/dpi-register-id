@@ -4,7 +4,7 @@ import { Frame } from "../ui";
 
 export function MyId() {
   const navigate = useNavigate();
-  const { fullName, uin, reset } = useFlow();
+  const { fullName, uin, recordStatus, reset } = useFlow();
 
   return (
     <Frame title="My ID">
@@ -16,7 +16,8 @@ export function MyId() {
       ) : (
         <p>No ID yet</p>
       )}
-      <p>A face check is not a match until the server says so.</p>
+      {recordStatus ? <p>Record status: {recordStatus}</p> : null}
+      <p>A face check is a match only when the server says so.</p>
       <p>This page does not hold a login token.</p>
       <div className="actions">
         {uin ? (
