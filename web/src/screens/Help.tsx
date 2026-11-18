@@ -1,9 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { useFlow } from "../flow";
 import { Frame } from "../ui";
+import { ApplicationSaveNotice, useSaveApplication } from "./saveApplication";
 
 export function Help() {
   const { attemptsLeft } = useFlow();
+  const { pending, error, saveApplication } = useSaveApplication();
 
   return (
     <Frame
@@ -26,13 +28,35 @@ export function Help() {
           <p>If the head turn is missed, turn more slowly and a little further.</p>
         </div>
       </div>
+      <ApplicationSaveNotice pending={pending} error={error} />
       <div className="actions">
-        <Link to="/enroll/capture" className="primary">
+        <Link
+          to="/enroll/capture"
+          className="primary"
+          onClick={(event) => {
+            if (pending) event.preventDefault();
+          }}
+        >
           Try again
         </Link>
-        <Link to="/enroll/paused" className="secondary">
-          I can&apos;t do the face check
-        </Link>
+        <button
+          type="button"
+          className="secondary"
+          disabled={pending}
+          aria-busy={pending}
+          onClick={() => void saveApplication("no-camera")}
+        >
+          I can't do the face check
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          disabled={pending}
+          aria-busy={pending}
+          onClick={() => void saveApplication("camera-quality")}
+        >
+          The camera is not good enough
+        </button>
       </div>
     </Frame>
   );

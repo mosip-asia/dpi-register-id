@@ -15,8 +15,17 @@ class FakeRedis:
         self.values: dict[str, str] = {}
         self.ttls: dict[str, int] = {}
 
-    def set(self, name: str, value: str, ex: int | None = None, **kwargs: object) -> bool:
+    def set(
+        self,
+        name: str,
+        value: str,
+        ex: int | None = None,
+        nx: bool = False,
+        **kwargs: object,
+    ) -> bool | None:
         del kwargs
+        if nx and name in self.values:
+            return None
         self.values[name] = value
         if ex is not None:
             self.ttls[name] = ex

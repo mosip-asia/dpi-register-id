@@ -14,8 +14,16 @@ import logging
 import math
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException
+from pydantic import ValidationError
 from register_id.access import CUSTODIAN_ROLES, DEMOGRAPHIC_ROLES, require_role
+from register_id.application import (
+    ApplicationCreated,
+    ApplicationCreate,
+    create_application,
+    validation_detail,
+)
+from register_id.application_store import ApplicationStoreError, get_application_store
 from register_id.audit import list_events, record_event
 from register_id.cbeff import build_cbeff_xml, extract_jpeg_bytes
 from register_id.email import EmailResult, decode_id_card_png, send_enrollment_email
@@ -454,6 +462,26 @@ def enroll_citizen_endpoint(req: EnrollRequest):
         },
         mail,
     )
+
+
+@router.post("/applications", status_code=201, response_model=ApplicationCreated)
+def create_application_endpoint(payload: Any = Body(...)) -> ApplicationCreated:
+    """
+    Store a draft application for someone who could not finish a face capture.
+
+    A draft is not an identity. This route does not enroll, write IDRepo,
+    call Keycloak, embed a face, or send mail.
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="request body must be an object")
+    try:
+        application = ApplicationCreate.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=validation_detail(exc)) from exc
+    try:
+        return create_application(get_application_store(), application)
+    except ApplicationStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/credentials", response_model=CredentialResponse)

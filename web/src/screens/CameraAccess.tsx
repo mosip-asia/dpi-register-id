@@ -1,7 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { Frame } from "../ui";
+import { ApplicationSaveNotice, useSaveApplication } from "./saveApplication";
 
 export function CameraAccess() {
+  const { pending, error, saveApplication } = useSaveApplication();
+
   return (
     <Frame
       stepIndex={5}
@@ -16,13 +19,26 @@ export function CameraAccess() {
         </>
       }
     >
+      <ApplicationSaveNotice pending={pending} error={error} />
       <div className="actions">
-        <Link to="/enroll/capture" className="primary">
+        <Link
+          to="/enroll/capture"
+          className="primary"
+          onClick={(event) => {
+            if (pending) event.preventDefault();
+          }}
+        >
           Continue
         </Link>
-        <Link to="/enroll/help" className="secondary">
+        <button
+          type="button"
+          className="secondary"
+          disabled={pending}
+          aria-busy={pending}
+          onClick={() => void saveApplication("no-camera")}
+        >
           I don't have a camera
-        </Link>
+        </button>
       </div>
     </Frame>
   );

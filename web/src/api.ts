@@ -141,3 +141,28 @@ export function enrollCitizen(input: {
 export function verifyFace(input: { uin: string; probeDescriptor: number[]; liveness: LivenessReport }) {
   return postJson<VerifyResult>("/api/authenticate", input);
 }
+
+export type ApplicationReason = "no-camera" | "camera-quality";
+
+export type ApplicationDraft = {
+  code: string;
+  expiresAt: number;
+  expiresInSeconds: number;
+};
+
+export function createApplication(input: {
+  fullName: string;
+  gender: string;
+  dateOfBirth: string;
+  email: string;
+  researchOptIn: boolean;
+  reason: ApplicationReason;
+  consent: {
+    accepted: true;
+    purpose: string;
+    acceptedAt: number;
+    language: "eng" | "tha";
+  };
+}) {
+  return postJson<ApplicationDraft>("/api/applications", input);
+}

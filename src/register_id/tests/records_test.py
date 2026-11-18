@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi.testclient import TestClient
 from mock.idrepo.app import idrepo_app
 from register_id.access import CUSTODIAN_ROLES, DEMOGRAPHIC_ROLES, require_role
@@ -119,7 +121,9 @@ def test_custodian_read_includes_biometrics_when_requested():
 
 def test_update_demographics_login_flag_and_delete_face():
     client = IDRepoClient(base_url="http://127.0.0.1:9", enable_inprocess_fallback=True)
-    uin = "7788-1200-0002"
+    # A fresh UIN. Reusing one leaves its old created_at, and the recent list
+    # of 50 then omits it once the shared registry already has newer rows.
+    uin = f"7788-1200-{uuid.uuid4().hex[:8]}"
     templates = [
         {"sector": "front", "embedding": [0.5, 0.6]},
         {"sector": "left", "embedding": [0.1, 0.2]},

@@ -316,8 +316,15 @@ select[aria-invalid="true"] {
   color: var(--ait-grey);
 }
 
-.secondary:hover {
+.secondary:hover:not(:disabled) {
   background: var(--rid-paper);
+}
+
+.secondary:disabled {
+  background: var(--rid-paper);
+  border-color: var(--rid-line);
+  color: var(--ait-grey);
+  cursor: not-allowed;
 }
 
 .quiet {
@@ -342,7 +349,7 @@ select[aria-invalid="true"] {
 }
 
 .primary:active:not(:disabled),
-.secondary:active,
+.secondary:active:not(:disabled),
 .quiet:active:not(:disabled) {
   transform: translateY(1px);
 }
@@ -653,6 +660,6 @@ select[aria-invalid="true"] {
   .quiet { transition: none; }
 
   .primary:active:not(:disabled),
-  .secondary:active,
+  .secondary:active:not(:disabled),
   .quiet:active:not(:disabled) { transform: none; }
 }

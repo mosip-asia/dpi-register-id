@@ -25,6 +25,9 @@ export type FlowState = {
   lastMessage: string | null;
   lastDistance: number | null;
   verified: boolean;
+  applicationCode: string | null;
+  applicationExpiresAt: number | null;
+  applicationReason: "no-camera" | "camera-quality" | null;
 };
 
 const empty: FlowState = {
@@ -45,6 +48,9 @@ const empty: FlowState = {
   lastMessage: null,
   lastDistance: null,
   verified: false,
+  applicationCode: null,
+  applicationExpiresAt: null,
+  applicationReason: null,
 };
 
 type FlowApi = FlowState & {
