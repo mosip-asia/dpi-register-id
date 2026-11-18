@@ -9,15 +9,9 @@ export function Consent() {
   return (
     <Frame
       stepIndex={2}
-      stepCount={6}
+      stepCount={8}
       kicker="Consent"
       title="Before we take your photo"
-      aside={
-        <>
-          <h2>How long</h2>
-          <p>We keep the photo with your ID while that ID is active in this sandbox.</p>
-        </>
-      }
     >
       <div className="stack">
         <div className="panel">
@@ -33,6 +27,12 @@ export function Consent() {
             This service stores the photo and the face signature. Other services do not receive the photo.
           </p>
         </div>
+        <div className="panel">
+          <strong>How long</strong>
+          <p>We keep the photo with your ID while that ID is active in this sandbox.</p>
+        </div>
+        <fieldset className="agreements">
+        <legend>Agreement</legend>
         <label className="check">
           <input
             type="checkbox"
@@ -49,6 +49,7 @@ export function Consent() {
           />
           You may use my photo for research. This is optional.
         </label>
+        </fieldset>
       </div>
       <div className="actions">
         <button

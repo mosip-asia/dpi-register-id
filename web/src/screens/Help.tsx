@@ -7,17 +7,19 @@ export function Help() {
 
   return (
     <Frame
-      stepIndex={6}
-      stepCount={6}
       kicker="Help"
       title="Camera help"
       aside={<p>An officer can review the application instead.</p>}
     >
       <div className="stack">
-        {attemptsLeft === 0 ? <p className="note">No attempts left on this browser.</p> : null}
+        {attemptsLeft === 0 ? (
+          <p className="note" role="alert">
+            No attempts left on this browser.
+          </p>
+        ) : null}
         <p>If the picture is dark, use a window or a lamp. Leave the flash off.</p>
         <div className="panel">
-          <p>Common fixes</p>
+          <strong>Common fixes</strong>
           <p>Allow the camera in the address bar, then try again.</p>
           <p>If the face check does not load, refresh the page. The model is about 12 MB.</p>
           <p>If your face is not found, face a light and sit about an arm's length away.</p>

@@ -6,11 +6,11 @@ export function Paused() {
   const { uin } = useFlow();
 
   return (
-    <Frame stepIndex={6} stepCount={6} kicker="Paused" title="The face check can wait">
+    <Frame kicker="Paused" title="The face check can wait">
       <div className="stack">
         <p>You can stop here and come back on this browser.</p>
-        <p>Application number</p>
-        <p className="uin">{uin ?? "Not issued yet"}</p>
+        <strong>Application number</strong>
+        {uin ? <p className="uin">{uin}</p> : <p>Not issued yet</p>}
         <p>An officer can review the application later.</p>
         <p>This screen does not send email.</p>
         <p>You can try again later from another device.</p>

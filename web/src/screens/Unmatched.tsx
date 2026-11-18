@@ -6,17 +6,26 @@ export function Unmatched() {
   const { lastMessage, attemptsLeft } = useFlow();
 
   return (
-    <Frame stepIndex={3} stepCount={3} kicker="Unmatched" title="This face did not match the ID">
+    <Frame
+      stepIndex={4}
+      stepCount={4}
+      kicker="Unmatched"
+      title="This face did not match the ID"
+      lede="You can try again while attempts remain."
+    >
       <p>{lastMessage ?? "No face check has been sent from this browser."}</p>
       <p>Attempts left: {attemptsLeft}</p>
+      {attemptsLeft > 0 ? null : (
+        <p className="callout" role="status">
+          No attempts left. An officer can review the application.
+        </p>
+      )}
       <div className="actions">
         {attemptsLeft > 0 ? (
           <Link to="/prove/check" className="primary">
             Try again
           </Link>
-        ) : (
-          <p className="note">No attempts left. An officer can review the application.</p>
-        )}
+        ) : null}
         <Link to="/enroll/help" className="secondary">
           Get help
         </Link>

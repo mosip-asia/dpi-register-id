@@ -222,3 +222,7 @@ web/public/models/
 
 docker-compose.override.yml
 !.keeps
+
+# Local agent indexes and session caches. Not part of the product.
+.winnow/
+.hallmark/

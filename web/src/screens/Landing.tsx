@@ -5,7 +5,7 @@ export function Landing() {
   return (
     <Frame
       stepIndex={1}
-      stepCount={6}
+      stepCount={8}
       kicker="Start"
       title="Get your citizen ID from home"
       lede="This creates a sandbox citizen ID you can confirm with your face. You need a webcam or phone camera, an email address, and about 3 minutes. This page does not issue a login token."
@@ -14,8 +14,8 @@ export function Landing() {
         <Link to="/enroll/consent" className="primary">
           Start
         </Link>
-        <Link to="/prove" className="quiet">
-          Already have an ID? Use it
+        <Link to="/prove" className="secondary">
+          Use an existing ID
         </Link>
       </div>
     </Frame>

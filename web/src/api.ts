@@ -26,6 +26,8 @@ export type EnrollResult = {
   livenessSource: string;
   templateCount: number;
   message: string;
+  emailSent: boolean;
+  emailStatus: string;
 };
 
 export type VerifyResult = {
@@ -52,7 +54,14 @@ export class ApiError extends Error {
   }
 }
 
-type ErrorBody = { detail?: string | Array<{ msg?: string }> };
+type ErrorItem = { loc?: Array<string | number>; msg?: string };
+type ErrorBody = { detail?: string | ErrorItem[] };
+
+function formatErrorItem(item: ErrorItem): string | null {
+  if (!item.msg) return null;
+  const field = (item.loc ?? []).filter((part) => part !== "body").join(".");
+  return field ? `${field}: ${item.msg}` : item.msg;
+}
 
 async function readError(response: Response): Promise<ApiError> {
   let message = response.statusText || `Request failed (${response.status})`;
@@ -60,7 +69,7 @@ async function readError(response: Response): Promise<ApiError> {
     const { detail } = (await response.json()) as ErrorBody;
     if (typeof detail === "string" && detail) message = detail;
     else if (Array.isArray(detail)) {
-      const parts = detail.map((item) => item.msg).filter((msg): msg is string => Boolean(msg));
+      const parts = detail.map(formatErrorItem).filter((part): part is string => Boolean(part));
       if (parts.length) message = parts.join("; ");
     }
   } catch {
@@ -107,7 +116,10 @@ export function enrollCitizen(input: {
   faceImage: string;
   faceDescriptors: number[][];
   liveness: LivenessReport;
+  emailIdCard?: boolean;
+  idCardImage?: string;
 }) {
+  const emailIdCard = input.emailIdCard ?? false;
   return postJson<EnrollResult>("/api/enroll", {
     uin: input.uin,
     fullName: input.fullName,
@@ -121,6 +133,8 @@ export function enrollCitizen(input: {
     },
     faceDescriptors: input.faceDescriptors,
     liveness: input.liveness,
+    emailIdCard,
+    ...(emailIdCard && input.idCardImage ? { idCardImage: input.idCardImage } : {}),
   });
 }
 

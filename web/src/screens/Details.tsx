@@ -5,20 +5,23 @@ import { Frame } from "../ui";
 export function Details() {
   const navigate = useNavigate();
   const { fullName, dateOfBirth, gender, email, consentAccepted, update } = useFlow();
+  const emailTrimmed = email.trim();
+  const emailInvalid = emailTrimmed !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrimmed);
   const ready =
     consentAccepted &&
     fullName.trim() !== "" &&
     dateOfBirth.trim() !== "" &&
     gender.trim() !== "" &&
-    email.trim() !== "";
+    emailTrimmed !== "" &&
+    !emailInvalid;
 
   return (
     <Frame
       stepIndex={3}
-      stepCount={6}
+      stepCount={8}
       kicker="Details"
       title="Tell us about you"
-      aside={<p>Next turns on when these are filled.</p>}
+      aside={<p>All fields are required before you can continue.</p>}
     >
       <div className="stack">
         <label>
@@ -44,7 +47,7 @@ export function Details() {
             value={gender}
             onChange={(event) => update({ gender: event.target.value })}
           >
-            <option value=""></option>
+            <option value="">Select</option>
             <option>Female</option>
             <option>Male</option>
             <option>Another</option>
@@ -57,12 +60,20 @@ export function Details() {
             type="email"
             value={email}
             autoComplete="email"
+            aria-invalid={emailInvalid || undefined}
             onChange={(event) => update({ email: event.target.value })}
           />
         </label>
       </div>
+      {emailInvalid ? (
+        <p className="note" role="alert">
+          Enter an email address with a name, an @ sign, and a domain.
+        </p>
+      ) : null}
       {consentAccepted ? null : (
-        <p className="note">Agree to the photo consent before these details.</p>
+        <p className="note" role="alert">
+          Agree to the photo consent before these details.
+        </p>
       )}
       <div className="actions">
         <button

@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useFlow } from "./flow";
 
 const enrollSteps = [
   { name: "Start", to: "/" },
@@ -9,12 +10,15 @@ const enrollSteps = [
   { name: "Face check", to: "/enroll/tutorial" },
   { name: "Camera", to: "/enroll/camera" },
   { name: "Photo", to: "/enroll/capture" },
+  { name: "Review", to: "/enroll/review" },
+  { name: "ID", to: "/enroll/ready" },
 ] as const;
 
 const proveSteps = [
   { name: "Service", to: "/prove" },
   { name: "Your ID", to: "/prove/id" },
   { name: "Face check", to: "/prove/check" },
+  { name: "Result", to: "/prove/verified" },
 ] as const;
 
 export function Frame({
@@ -35,9 +39,13 @@ export function Frame({
   children?: ReactNode;
 }) {
   const reduce = useReducedMotion();
-  const steps = stepCount === 3 ? proveSteps : stepCount === 6 ? enrollSteps : [];
+  const flow = useFlow();
+  const steps = stepCount === 4 ? proveSteps : stepCount === 8 ? enrollSteps : [];
+  const pastEnd = Boolean(stepIndex && steps.length > 0 && stepIndex > steps.length);
   const phoneStep =
-    stepIndex && stepCount ? `Step ${stepIndex} of ${stepCount}${kicker ? ` · ${kicker}` : ""}` : kicker;
+    stepIndex && stepCount && stepIndex <= stepCount
+      ? `Step ${stepIndex} of ${stepCount}${kicker ? `, ${kicker}` : ""}`
+      : kicker;
 
   return (
     <div className={steps.length === 0 ? "frame is-plain" : "frame"}>
@@ -46,17 +54,21 @@ export function Frame({
           <ol>
             {steps.map((step, index) => {
               const number = index + 1;
-              const done = stepIndex !== undefined && number < stepIndex;
-              const current = number === stepIndex;
+              const done = pastEnd || (stepIndex !== undefined && number < stepIndex);
+              const current = !pastEnd && number === stepIndex;
               const className = current ? "is-current" : done ? "is-done" : undefined;
+              const reviewStillOpen = Boolean(flow.photoDataUrl && flow.scan);
+              const canOpen = step.to !== "/enroll/review" || reviewStillOpen;
               return (
                 <li key={step.to}>
-                  {done ? (
+                  {done && canOpen ? (
                     <Link to={step.to} className={className}>
                       {step.name}
                     </Link>
                   ) : (
-                    <span className={className}>{step.name}</span>
+                    <span className={className} aria-current={current ? "step" : undefined}>
+                      {step.name}
+                    </span>
                   )}
                 </li>
               );
@@ -80,6 +92,41 @@ export function Frame({
   );
 }
 
+export function CopyValue({ value }: { value: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle");
+
+  useEffect(() => {
+    if (state !== "success" && state !== "error") return;
+    const timer = window.setTimeout(() => setState("idle"), 2000);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
+  async function onCopy() {
+    setState("loading");
+    try {
+      await navigator.clipboard.writeText(value);
+      setState("success");
+    } catch {
+      setState("error");
+    }
+  }
+
+  const label =
+    state === "loading" ? "Copying" : state === "success" ? "Copied" : state === "error" ? "Copy failed" : "Copy";
+
+  return (
+    <button
+      type="button"
+      className="quiet"
+      data-state={state === "idle" ? undefined : state}
+      disabled={state === "loading"}
+      onClick={() => void onCopy()}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   return (
     <>
@@ -87,12 +134,14 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="lockup">
           <strong className="institute">Asian Institute of Technology</strong>
           <span className="lockup-rule" aria-hidden="true" />
-          <div className="brand">
+          <Link to="/" className="brand">
             <strong>register-id</strong>
             <span>Citizen Registration Gateway</span>
-          </div>
+          </Link>
         </div>
-        <span className="lang">EN</span>
+        <span className="lang" lang="en">
+          EN
+        </span>
       </header>
       {children}
     </>

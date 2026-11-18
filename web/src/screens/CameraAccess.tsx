@@ -5,7 +5,7 @@ export function CameraAccess() {
   return (
     <Frame
       stepIndex={5}
-      stepCount={6}
+      stepCount={8}
       kicker="Camera"
       title="We need your camera"
       lede="Your browser will ask to use the camera. The camera is only used during the face check."
@@ -18,7 +18,7 @@ export function CameraAccess() {
     >
       <div className="actions">
         <Link to="/enroll/capture" className="primary">
-          Turn on camera
+          Continue
         </Link>
         <Link to="/enroll/help" className="secondary">
           I don't have a camera

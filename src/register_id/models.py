@@ -129,6 +129,9 @@ class EnrollRequest(BaseModel):
     uin: str = Field(..., min_length=4, max_length=32, description="MOSIP Unique Identification Number")
     fullName: str = Field(..., min_length=1, max_length=128, description="Citizen full legal name")
     email: str = Field(..., max_length=128, description="Citizen email address")
+    emailIdCard: bool = False
+    # Browser-drawn card (name, date of birth, UIN, QR). Not stored or logged.
+    idCardImage: str | None = Field(default=None, repr=False)
     faceImage: str = Field(..., description="Base64-encoded face image (JPEG/PNG data URL)")
     faceViews: list[FaceViewSample] | None = None
     faceDescriptors: list[list[float]] | None = Field(default=None, min_length=1, max_length=5)

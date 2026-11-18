@@ -81,10 +81,12 @@ def test_api_enroll_and_authenticate_flow(monkeypatch):
     monkeypatch.setenv("REGISTER_ID_OPERATOR_ROLE", "reader")
     closed = client.get("/api/citizens")
     assert closed.status_code == 401
-    list_res = client.get("/api/citizens", headers={"Authorization": "Bearer test-operator"})
+    headers = {"Authorization": "Bearer test-operator"}
+    list_res = client.get("/api/citizens", headers=headers)
     assert list_res.status_code == 200
-    uins = [c["uin"] for c in list_res.json()]
-    assert uin in uins
+    detail_res = client.get(f"/api/citizens/{uin}", headers=headers)
+    assert detail_res.status_code == 200
+    assert detail_res.json()["uin"] == uin
 
     auth_res = client.post(
         "/api/authenticate",

@@ -18,6 +18,7 @@ from fastapi import APIRouter, Header, HTTPException
 from register_id.access import CUSTODIAN_ROLES, DEMOGRAPHIC_ROLES, require_role
 from register_id.audit import list_events, record_event
 from register_id.cbeff import build_cbeff_xml, extract_jpeg_bytes
+from register_id.email import EmailResult, decode_id_card_png, send_enrollment_email
 from register_id.embedder import ENGINE_NAME, embed_face_image
 from register_id.face_check import (
     assess_capture,
@@ -152,6 +153,28 @@ def _audit(kind: str, actor: str, uin: str, result: str, detail: str) -> None:
             "detail": detail,
         }
     )
+
+
+def _notify_enrollment(req: EnrollRequest) -> EmailResult:
+    """Send the UIN confirmation. Failures do not undo the IDRepo write.
+
+    A missing or unusable card image is omitted. The picture is not written to
+    IDRepo, the audit log, or application logs.
+    """
+    card = decode_id_card_png(req.idCardImage) if req.emailIdCard else None
+    return send_enrollment_email(
+        to=req.email,
+        full_name=req.fullName,
+        uin=req.uin,
+        email_id_card=req.emailIdCard,
+        id_card_png=card,
+    )
+
+
+def _with_email(payload: dict[str, Any], mail: EmailResult) -> dict[str, Any]:
+    payload["emailSent"] = mail.sent
+    payload["emailStatus"] = mail.detail
+    return payload
 
 
 @router.get("/audit")
@@ -342,6 +365,7 @@ def _enroll_with_descriptors(req: EnrollRequest, idrepo: IDRepoClient, cbeff_xml
     ]
     templates.append({"sector": "front", "embedding": hash_vector, "engine": ENGINE_NAME})
     _store_identity(idrepo, req, cbeff_xml, templates, record_status)
+    mail = _notify_enrollment(req)
 
     _audit(
         "enroll",
@@ -350,24 +374,28 @@ def _enroll_with_descriptors(req: EnrollRequest, idrepo: IDRepoClient, cbeff_xml
         "success",
         (
             f"{record_status} stored; {len(descriptors)} {FACE_DESCRIPTOR_ENGINE} templates; "
-            f"liveness reported by browser, not measured by server; {_consent_note(req)}"
+            f"liveness reported by browser, not measured by server; {_consent_note(req)}; "
+            f"{mail.detail}"
         )[:240],
     )
-    return {
-        "status": "SUCCESS",
-        "message": (
-            "Citizen face stored with browser face descriptors via MOSIP IDRepo interface. "
-            "Liveness was reported by the browser, not measured by the server."
-        ),
-        "uin": req.uin,
-        "fullName": req.fullName,
-        "backend": "mosip-idrepo-rest",
-        "cbeffGenerated": True,
-        "recordStatus": record_status,
-        "faceEngine": FACE_DESCRIPTOR_ENGINE,
-        "livenessSource": liveness.source,
-        "templateCount": len(descriptors),
-    }
+    return _with_email(
+        {
+            "status": "SUCCESS",
+            "message": (
+                "Citizen face stored with browser face descriptors via MOSIP IDRepo interface. "
+                "Liveness was reported by the browser, not measured by the server."
+            ),
+            "uin": req.uin,
+            "fullName": req.fullName,
+            "backend": "mosip-idrepo-rest",
+            "cbeffGenerated": True,
+            "recordStatus": record_status,
+            "faceEngine": FACE_DESCRIPTOR_ENGINE,
+            "livenessSource": liveness.source,
+            "templateCount": len(descriptors),
+        },
+        mail,
+    )
 
 
 @router.post("/enroll")
@@ -405,17 +433,27 @@ def enroll_citizen_endpoint(req: EnrollRequest):
     record_status = "biometric" if may_store_biometric_record(False, False) else "draft"
     templates = _templates_for_enrollment(req)
     _store_identity(idrepo, req, cbeff_xml, templates, record_status)
+    mail = _notify_enrollment(req)
 
-    _audit("enroll", "citizen", req.uin, "success", f"draft stored; {_consent_note(req)}")
-    return {
-        "status": "SUCCESS",
-        "message": "Citizen face stored as a draft via MOSIP IDRepo interface",
-        "uin": req.uin,
-        "fullName": req.fullName,
-        "backend": "mosip-idrepo-rest",
-        "cbeffGenerated": True,
-        "recordStatus": record_status,
-    }
+    _audit(
+        "enroll",
+        "citizen",
+        req.uin,
+        "success",
+        f"draft stored; {_consent_note(req)}; {mail.detail}"[:240],
+    )
+    return _with_email(
+        {
+            "status": "SUCCESS",
+            "message": "Citizen face stored as a draft via MOSIP IDRepo interface",
+            "uin": req.uin,
+            "fullName": req.fullName,
+            "backend": "mosip-idrepo-rest",
+            "cbeffGenerated": True,
+            "recordStatus": record_status,
+        },
+        mail,
+    )
 
 
 @router.post("/credentials", response_model=CredentialResponse)

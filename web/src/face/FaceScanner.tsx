@@ -63,7 +63,9 @@ export function FaceScanner({ mode, challengeId, requiredBlinks, onDone }: FaceS
 
       <div className="face-status" aria-live="polite">
         {scan.error ? (
-          <p className="note">{ERRORS[scan.error]}</p>
+          <p className="note" role="alert">
+            {ERRORS[scan.error]}
+          </p>
         ) : (
           <>
             <p className="face-instruction">{INSTRUCTIONS[scan.phase]}</p>

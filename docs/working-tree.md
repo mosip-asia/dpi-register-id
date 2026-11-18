@@ -27,7 +27,7 @@ The portal is a desktop page: institute name, then register-id, then a step rail
 
 Enrollment order is consent, details, face-check instructions, camera, photo, review, then create. Later enrollment routes send the browser back when consent or the detail fields are missing. Gender, date of birth, and the research option stay in `sessionStorage`. The enroll request sends UIN, name, email, photo, and consent.
 
-The ready screen shows the number only after `POST /api/enroll` succeeds. A typed UIN is not treated as enrolled. The page does not send email. A face check shows the server message on the same page when the server did not compare a face, and it does not spend an attempt for that result. `/prove/verified` renders only after `isFaceMatch` is true, and that flag is dropped on reload. `jwtToken` stays null. The portal does not start `/api/login/start`.
+The ready screen shows the number only after `POST /api/enroll` succeeds. A typed UIN is not treated as enrolled. A face check shows the server message on the same page when the server did not compare a face, and it does not spend an attempt for that result. `/prove/verified` renders only after `isFaceMatch` is true, and that flag is dropped on reload. `jwtToken` stays null. The portal does not start `/api/login/start`. Confirmation mail, the ID card, and the QR upload are described in the section below.
 
 ### Registry behavior
 
@@ -88,3 +88,37 @@ A fresh Postgres volume runs `db/init-idrepo.sql` once. A volume created by the 
 - SQLite fallback: rename `face_template` to `face_template_legacy`, create the new table, copy each old row with `slot` `0` and `engine` NULL, then drop the legacy table.
 
 Saving templates for a UIN deletes that UIN's rows and inserts the new list. Slot `0` is the first descriptor. The hash row is another slot with sector `front`. Reads order by `sector`, then `slot`. A row with no engine is returned without an `engine` field, so older exact-match checks still hold.
+
+## Registration QR, ID card, and confirmation mail
+
+This is the work after `b9685f0`. It does not change `citizen_identity` or `face_template`. The face match, the head sweep, and the hash embedder are unchanged.
+
+### What the portal shows
+
+Enrollment is eight steps on the rail: Start, Consent, Details, Face check, Camera, Photo, Review, ID. Prove is four: Service, Your ID, Face check, Result. Help, paused, and fix stay off the rail. Review is a link only while a photo and a scan are still in the page. After create clears them, Review is plain text. The register-id lockup links home. `design.md` is the visual lock for this shell: AIT colors from `branding/tokens.css`, Metropolis and Lato, 4px radius, 160ms ease-out, and one primary action per screen. Lime stays the top rule on the success panel. Motion tokens `--rid-ease-out` and `--rid-dur` are in `branding/tokens.css`.
+
+Errors use `role="alert"`. Waiting states use `role="status"`. The face scanner does the same. Copy of the registration number is a button that reads Copied or Copy failed. Clearing My ID asks for a second click. Details and the fix screen refuse an email that has no name, `@`, and domain. Review will not continue without a scan, name, gender, date of birth, and email. The camera step says Continue. Verified no longer prints the distance. Unmatched says how many attempts remain.
+
+Create always calls `GET /api/idgenerator/uin`. A number typed on the prove screen is not reused. That number can be shorter than four characters, and `EnrollRequest.uin` rejects it with `String should have at least 4 characters`. The page names the field when a 422 returns a list of errors.
+
+### ID card
+
+After enroll succeeds, Ready and My ID draw a 1600×800 PNG. The left side is the name, the date of birth (`10 December 1815` from `YYYY-MM-DD`), and the registration number. The right side is a QR code whose payload is that number and nothing else. **Save ID card** downloads that PNG. The picture is drawn in the browser (`web/src/drawIdCard.ts`). It is not stored in IDRepo.
+
+### Verification upload
+
+On **Which ID is yours?**, **Upload QR code** reads an image with `jsqr`. A registration number is 8–16 digits, with optional hyphen groups. A match fills the ID field. The person can still type the number. The face check is unchanged: the QR only chooses which record is compared.
+
+The packages are `qrcode` 1.5.4 and `jsqr` 1.4.0, in `web/package.json`.
+
+### Confirmation email
+
+`POST /api/enroll` sends mail after the IDRepo write, on both the descriptor path and the hash draft path. A mail failure does not roll the write back. The response adds `emailSent` and `emailStatus`. The audit line appends the mail detail and stays within 240 characters. The card image is not written to the audit log, the identity row, or application logs.
+
+SMTP comes from `EMAIL_PROVIDER`, `EMAIL_FROM`, and `EMAIL_PASSWORD`. An empty provider skips sending. The only provider is `gmail`: `smtp.gmail.com`, port 587, STARTTLS. `EMAIL_PASSWORD` is a Gmail app password. Compose maps the three variables from `.env`. `.env.example` lists them empty. `tests/conftest.py` deletes them for every test so a developer `.env` cannot send mail during pytest. Tests that need SMTP set the variables themselves.
+
+Every message that is actually sent is `multipart/alternative`: plain text plus HTML. The HTML is a single 560px table, white background, green heading `#3f6433`, ink `#24321e`, no remote images and no remote CSS. The plain part and the HTML part both contain the registration number. Both also contain a QR code of that number, generated on the server with `segno` (`segno>=1.6.6`). The QR is a PNG, `Content-ID: <uin-qr>`, `Content-Disposition: inline`, and the HTML refers to `cid:uin-qr`. The payload is the UIN alone. Error correction is H. The symbol is not a micro QR.
+
+The create screen has an unchecked box, **Email the ID card to {address}**. When it is ticked, the browser draws the card and sends `emailIdCard: true` plus `idCardImage` as a `data:image/png;base64,` URL. The server keeps the PNG only when it is a real PNG of at most 2,000,000 bytes. A missing, non-PNG, or oversized image does not 422 the enroll. The mail still goes out, with the UIN QR and without the card. When the PNG is accepted it is a second inline image, `Content-ID: <id-card>`, `cid:id-card`. `emailIdCard: false` drops `idCardImage` even if the client sent one. The face photo is never attached.
+
+`emailSent` is false when SMTP is unset or delivery fails. The ready screen then tells the person to keep the number, or to save the card on the page if they had asked for it.

@@ -37,4 +37,6 @@
   --rid-space-8: 64px;
   --rid-radius: 4px;
   --rid-rule: 1px solid var(--rid-line);
+  --rid-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --rid-dur: 160ms;
 }

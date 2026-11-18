@@ -15,12 +15,15 @@
     "@fontsource/metropolis": "^5.2.8",
     "@tanstack/react-router": "^1.139.3",
     "@vladmandic/face-api": "^1.7.15",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.555.0",
     "motion": "^12.23.24",
+    "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.1",

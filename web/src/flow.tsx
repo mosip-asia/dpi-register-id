@@ -12,6 +12,7 @@ export type FlowState = {
   gender: string;
   dateOfBirth: string;
   email: string;
+  emailSent: boolean | null;
   consentAccepted: boolean;
   researchOptIn: boolean;
   photoDataUrl: string | null;
@@ -31,6 +32,7 @@ const empty: FlowState = {
   gender: "",
   dateOfBirth: "",
   email: "",
+  emailSent: null,
   consentAccepted: false,
   researchOptIn: false,
   photoDataUrl: null,

@@ -49,7 +49,7 @@ export function Capture() {
   return (
     <Frame
       stepIndex={6}
-      stepCount={6}
+      stepCount={8}
       kicker="Photo"
       title="Scan your face"
       aside={
@@ -64,7 +64,9 @@ export function Capture() {
     >
       {error ? (
         <>
-          <p className="note">{error}</p>
+          <p className="note" role="alert">
+            {error}
+          </p>
           <div className="actions">
             <button type="button" className="primary" onClick={() => setRound((current) => current + 1)}>
               Try again
@@ -72,7 +74,7 @@ export function Capture() {
           </div>
         </>
       ) : challenge ? (
-        <Suspense fallback={<p>Getting the face check ready…</p>}>
+        <Suspense fallback={<p className="status" role="status">Getting the face check ready…</p>}>
           <FaceScanner
             key={challenge.challengeId}
             mode="enroll"
@@ -82,7 +84,7 @@ export function Capture() {
           />
         </Suspense>
       ) : (
-        <p>Getting the face check ready…</p>
+        <p className="status" role="status">Getting the face check ready…</p>
       )}
     </Frame>
   );

@@ -16,6 +16,7 @@ export function FaceCheck() {
   const [error, setError] = useState<string | null>(null);
   const [missingId, setMissingId] = useState(false);
   const [round, setRound] = useState(0);
+  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     if (attemptsLeft === 0) return;
@@ -36,6 +37,7 @@ export function FaceCheck() {
   }, [attemptsLeft, round]);
 
   async function onDone(result: ScanResult) {
+    setVerifying(true);
     try {
       const verdict = await verifyFace({
         uin: uin ?? "",
@@ -67,8 +69,10 @@ export function FaceCheck() {
         return;
       }
       update({ verified: false, lastMessage: verdict.message });
+      setVerifying(false);
       setError(verdict.message ?? "The server did not compare this scan.");
     } catch (caught) {
+      setVerifying(false);
       if (caught instanceof ApiError && caught.status === 404) {
         setMissingId(true);
         setError("No ID with that number.");
@@ -81,14 +85,16 @@ export function FaceCheck() {
   return (
     <Frame
       stepIndex={3}
-      stepCount={3}
+      stepCount={4}
       kicker="Face check"
       title="Confirm it is you"
       aside={<p>The server compares this scan with the face stored for the ID. The head turn is checked in this browser.</p>}
     >
       {attemptsLeft === 0 ? (
         <div className="stack">
-          <p className="note">No attempts left. An officer can review the application.</p>
+          <p className="callout" role="status">
+            No attempts left. An officer can review the application.
+          </p>
           <div className="actions">
             <Link to="/enroll/help" className="secondary">
               Get help
@@ -97,7 +103,11 @@ export function FaceCheck() {
         </div>
       ) : (
         <>
-          {error ? <p className="note">{error}</p> : null}
+          {error ? (
+            <p className="note" role="alert">
+              {error}
+            </p>
+          ) : null}
           {missingId ? (
             <div className="actions">
               <Link to="/prove/id" className="primary">
@@ -110,8 +120,12 @@ export function FaceCheck() {
                 Scan again
               </button>
             </div>
+          ) : verifying ? (
+            <p className="status" role="status" aria-busy="true">
+              Confirming with the server…
+            </p>
           ) : challenge ? (
-            <Suspense fallback={<p>Getting the face check ready…</p>}>
+            <Suspense fallback={<p className="status" role="status">Getting the face check ready…</p>}>
               <FaceScanner
                 key={challenge.challengeId}
                 mode="check"
@@ -121,7 +135,7 @@ export function FaceCheck() {
               />
             </Suspense>
           ) : (
-            <p>Getting the face check ready…</p>
+            <p className="status" role="status">Getting the face check ready…</p>
           )}
         </>
       )}

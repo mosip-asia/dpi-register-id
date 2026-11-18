@@ -8,7 +8,7 @@ export function ServiceAsks() {
   return (
     <Frame
       stepIndex={1}
-      stepCount={3}
+      stepCount={4}
       kicker="Service"
       title={`${serviceName} wants to confirm it is you`}
     >

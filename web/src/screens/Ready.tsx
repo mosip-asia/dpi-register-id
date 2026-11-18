@@ -2,8 +2,10 @@ import { Link } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { useState } from "react";
 import { ApiError, enrollCitizen, FACE_ENGINE, issueUin } from "../api";
+import { drawIdCard } from "../drawIdCard";
+import { IdCard } from "../IdCard";
 import { useFlow } from "../flow";
-import { Frame } from "../ui";
+import { CopyValue, Frame } from "../ui";
 
 function firstName(fullName: string) {
   return fullName.trim().split(/\s+/)[0] ?? "";
@@ -17,6 +19,7 @@ export function Ready() {
   const flow = useFlow();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [emailIdCard, setEmailIdCard] = useState(false);
   const given = firstName(flow.fullName);
   const title = flow.enrolled
     ? given
@@ -32,7 +35,21 @@ export function Ready() {
     setPending(true);
     setError(null);
     try {
-      const uin = flow.uin ?? (await issueUin());
+      // A number typed earlier on the prove screen is not an issued registration number.
+      const uin = await issueUin();
+      let idCardImage: string | undefined;
+      if (emailIdCard) {
+        try {
+          const drawn = await drawIdCard({
+            uin,
+            fullName: flow.fullName,
+            dateOfBirth: flow.dateOfBirth,
+          });
+          if (drawn) idCardImage = drawn;
+        } catch {
+          idCardImage = undefined;
+        }
+      }
       const result = await enrollCitizen({
         uin,
         fullName: flow.fullName,
@@ -45,10 +62,13 @@ export function Ready() {
           blinkCount: flow.scan.blinkCount,
           sweepYaws: flow.scan.sweepYaws,
         },
+        emailIdCard,
+        idCardImage,
       });
       flow.update({
         uin: result.uin,
         enrolled: true,
+        emailSent: result.emailSent,
         recordStatus: result.recordStatus,
         lastMessage: result.message,
         photoDataUrl: null,
@@ -65,13 +85,22 @@ export function Ready() {
 
   return (
     <Frame
-      stepIndex={6}
-      stepCount={6}
+      stepIndex={8}
+      stepCount={8}
       kicker="Ready"
       title={title}
       aside={
         <p>
-          This screen does not send email. The head turn was checked in this browser, not on the server.
+          {flow.enrolled
+            ? emailIdCard
+              ? flow.emailSent
+                ? `The ID card was emailed to ${flow.email}.`
+                : "The ID card was not emailed. Save it on this page."
+              : flow.emailSent
+                ? `A copy of this number was emailed to ${flow.email}.`
+                : "No confirmation email was sent. Keep this number."
+            : `If email delivery is available, the email includes a QR code of the registration number. Tick the box to also email the ID card to ${flow.email}.`}{" "}
+          The head turn was checked in this browser, not on the server.
         </p>
       }
     >
@@ -82,14 +111,33 @@ export function Ready() {
               <Check size={20} strokeWidth={1.75} aria-hidden />
               Your registration number
             </p>
-            <p className="uin">{flow.uin}</p>
+            <div className="uin-row">
+              <p className="uin">{flow.uin}</p>
+              <CopyValue value={flow.uin} />
+            </div>
+            <IdCard uin={flow.uin} fullName={flow.fullName} dateOfBirth={flow.dateOfBirth} />
             <p>Your face is enrolled. The server compares a new scan with it when you use this ID.</p>
           </div>
         ) : (
           <p>This creates the registration number and stores your photo and face signature.</p>
         )}
-        {error ? <p className="note">{error}</p> : null}
+        {error ? (
+          <p className="note" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
+      {!flow.enrolled && !rescan ? (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={emailIdCard}
+            disabled={pending}
+            onChange={(event) => setEmailIdCard(event.target.checked)}
+          />
+          Email the ID card to {flow.email}
+        </label>
+      ) : null}
       <div className="actions">
         {flow.enrolled && flow.uin ? (
           <>
@@ -105,7 +153,7 @@ export function Ready() {
             Scan again
           </Link>
         ) : (
-          <button type="button" className="primary" disabled={pending} onClick={() => void createId()}>
+          <button type="button" className="primary" disabled={pending} aria-busy={pending} onClick={() => void createId()}>
             {pending ? "Creating…" : "Create my ID"}
           </button>
         )}
