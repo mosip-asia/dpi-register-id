@@ -221,7 +221,9 @@ def test_descriptor_enroll_mails_the_same_qr(monkeypatch: pytest.MonkeyPatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["recordStatus"] == "biometric"
+    assert body["recordStatus"] == "draft"
+    assert "browser report is not a server liveness check" in body["message"]
+    assert "biometric" not in body["message"]
     assert body["emailSent"] is True
     assert _png_by_cid(calls["message"], "uin-qr").get_content() == registration_qr_png(uin)
     assert "id-card" not in calls["message"].as_string()

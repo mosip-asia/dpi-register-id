@@ -6,8 +6,10 @@ Exposes endpoints for citizen enrollment, ISO 30107-3 PAD liveness,
 
 Two enrollment and check paths exist. The image path hashes JPEG bytes and
 never reports a face match. The descriptor path takes face-api-128
-descriptors from the browser with browser-reported liveness bound to a
-single-use challenge, and compares descriptors on the server.
+descriptors from the browser with a report bound to a single-use challenge.
+That report is not a server liveness check, so enrollment stores a draft and
+does not keep the descriptors. Authenticate still compares a submitted
+descriptor with templates already stored.
 """
 
 import logging
@@ -342,10 +344,13 @@ def _reject_enroll(uin: str, message: str) -> HTTPException:
 
 def _enroll_with_descriptors(req: EnrollRequest, idrepo: IDRepoClient, cbeff_xml: str) -> dict:
     """
-    Store face-api-128 descriptors after the browser liveness report passes.
+    Store a draft after the descriptor report passes the non-liveness checks.
 
-    Liveness is reported by the browser, not measured here. Every check runs
-    before the IDRepo write, so a rejection stores nothing.
+    The challenge check rejects an expired, reused, or out-of-order report
+    before any write. That is anti-replay. The browser report is not a server
+    liveness check, so the record stays draft: demographics and the hash
+    duplicate-byte template only. Face-api descriptors, the face image, and
+    CBEFF are not written.
     """
     assert req.faceDescriptors is not None and req.liveness is not None
     try:
@@ -366,16 +371,10 @@ def _enroll_with_descriptors(req: EnrollRequest, idrepo: IDRepoClient, cbeff_xml
             req.uin, "The captured frames do not look like the same face. Scan again."
         )
 
-    record_status = (
-        "biometric"
-        if may_store_biometric_record(liveness.ok, engine_can_identify=True)
-        else "draft"
-    )
-    templates = [
-        {"sector": "front", "embedding": descriptor, "engine": FACE_DESCRIPTOR_ENGINE}
-        for descriptor in descriptors
-    ]
-    templates.append({"sector": "front", "embedding": hash_vector, "engine": ENGINE_NAME})
+    # Do not pass the browser report into the biometric gate. There is no
+    # server-side presentation check on this path.
+    record_status = "biometric" if may_store_biometric_record(False, False) else "draft"
+    templates = [{"sector": "front", "embedding": hash_vector}]
     _store_identity(idrepo, req, cbeff_xml, templates, record_status)
     mail = _notify_enrollment(req)
 
@@ -385,26 +384,22 @@ def _enroll_with_descriptors(req: EnrollRequest, idrepo: IDRepoClient, cbeff_xml
         req.uin,
         "success",
         (
-            f"{record_status} stored; {len(descriptors)} {FACE_DESCRIPTOR_ENGINE} templates; "
-            f"liveness reported by browser, not measured by server; {_consent_note(req)}; "
-            f"{mail.detail}"
+            f"draft stored; browser report is not a server liveness check; "
+            f"{_consent_note(req)}; {mail.detail}"
         )[:240],
     )
     return _with_email(
         {
             "status": "SUCCESS",
             "message": (
-                "Citizen face stored with browser face descriptors via MOSIP IDRepo interface. "
-                "Liveness was reported by the browser, not measured by the server."
+                "Citizen demographics stored as a draft via MOSIP IDRepo interface. "
+                "The browser report is not a server liveness check."
             ),
             "uin": req.uin,
             "fullName": req.fullName,
             "backend": "mosip-idrepo-rest",
             "cbeffGenerated": True,
             "recordStatus": record_status,
-            "faceEngine": FACE_DESCRIPTOR_ENGINE,
-            "livenessSource": liveness.source,
-            "templateCount": len(descriptors),
         },
         mail,
     )
@@ -417,10 +412,10 @@ def enroll_citizen_endpoint(req: EnrollRequest):
     1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
     2. Without faceDescriptors: computes hash templates from the image bytes
        and stores a draft. The face image and CBEFF are not written.
-       With faceDescriptors and liveness: checks the browser liveness report
-       against its challenge, stores face-api-128 descriptors as templates,
-       and marks the record biometric. The face image and CBEFF are written
-       with that biometric record.
+       With faceDescriptors and liveness: checks the challenge (anti-replay),
+       descriptor shape, and same-face consistency, then stores a draft.
+       The browser report is not a server liveness check, so face-api-128
+       descriptors, the face image, and CBEFF are not written.
     3. Persists demographics on the identity and templates on the IDA table.
 
     Keycloak login is a separate POST /api/credentials call. No password is accepted here.

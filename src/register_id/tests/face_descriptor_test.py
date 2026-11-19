@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from mock.idrepo import storage as storage_module
 from project.web import app
 from register_id.challenge_store import RedisChallengeStore, get_challenge_store
+from register_id.embedder import embed_face_image
 from register_id.face_check import compare_descriptor
 from register_id.face_descriptor import (
     DESCRIPTOR_CONSISTENCY_LIMIT,
@@ -102,6 +103,20 @@ def _enroll(uin: str, descriptors: list[list[float]], **overrides) -> object:
     }
     body.update(overrides)
     return client.post("/api/enroll", json=body)
+
+
+def _seed_gallery(idrepo: IDRepoClient, uin: str, descriptors: list[list[float]]) -> None:
+    """Store face-api rows directly. Descriptor enroll no longer writes them."""
+    assert idrepo.add_identity(
+        uin=uin,
+        full_name="Descriptor Citizen",
+        email="descriptor@citizen.asia",
+        templates=[
+            {"sector": "front", "embedding": values, "engine": FACE_DESCRIPTOR_ENGINE}
+            for values in descriptors
+        ],
+        status="draft",
+    )
 
 
 def _check(uin: str, probe: list[float], challenge_id: str | None = None) -> object:
@@ -296,34 +311,37 @@ def test_enroll_requires_descriptors_and_liveness_together(idrepo):
     assert idrepo.get_identity(uin) is None
 
 
-def test_enroll_with_descriptors_stores_biometric_and_engine_rows(idrepo):
+def test_enroll_with_descriptors_stores_draft_without_face_templates(idrepo):
     uin = _uin()
     base = _descriptor(20)
     frames = [base, _noisy(base, 21), _noisy(base, 22)]
+    portrait = _image(f"portrait-{uin}")
 
     res = _enroll(uin, frames)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["status"] == "SUCCESS"
-    assert body["recordStatus"] == "biometric"
-    assert body["faceEngine"] == "face-api-128"
-    assert body["livenessSource"] == "client"
-    assert body["templateCount"] == 3
+    assert body["recordStatus"] == "draft"
     assert body["cbeffGenerated"] is True
-    assert "reported by the browser" in body["message"]
+    assert "faceEngine" not in body
+    assert "livenessSource" not in body
+    assert "templateCount" not in body
+    assert body["message"] == (
+        "Citizen demographics stored as a draft via MOSIP IDRepo interface. "
+        "The browser report is not a server liveness check."
+    )
 
     stored = idrepo.get_identity(uin, include_biometrics=True)
-    assert stored["status"] == "biometric"
-    assert stored["face_image"] == _image(f"portrait-{uin}")
-    assert stored["cbeff_xml"] and "<BIR" in stored["cbeff_xml"]
+    assert stored["status"] == "draft"
+    assert stored["full_name"] == "Descriptor Citizen"
+    assert stored["email"] == "descriptor@citizen.asia"
+    assert not stored.get("face_image")
+    assert not stored.get("cbeff_xml")
+    assert portrait not in json.dumps(stored)
     templates = idrepo.get_face_templates(uin)
-    descriptor_rows = [row for row in templates if row.get("engine") == FACE_DESCRIPTOR_ENGINE]
-    hash_rows = [row for row in templates if row.get("engine") == "hash"]
-    assert len(descriptor_rows) == 3
-    assert len(hash_rows) == 1
-    assert all(row["sector"] == "front" for row in templates)
-    stored = sorted(tuple(row["embedding"]) for row in descriptor_rows)
-    assert stored == sorted(tuple(frame) for frame in frames)
+    assert templates == [{"sector": "front", "embedding": embed_face_image(portrait)}]
+    assert all(row.get("engine") != FACE_DESCRIPTOR_ENGINE for row in templates)
+    assert all(row["embedding"] not in frames for row in templates)
 
 
 def test_inconsistent_frames_are_rejected_and_nothing_is_stored(idrepo):
@@ -387,7 +405,7 @@ def test_enroll_without_descriptors_stays_a_hash_draft(idrepo):
 def test_authenticate_same_face_matches_on_the_server(idrepo):
     uin = _uin()
     base = _descriptor(50)
-    assert _enroll(uin, [base, _noisy(base, 51)]).status_code == 200
+    _seed_gallery(idrepo, uin, [base, _noisy(base, 51)])
 
     res = _check(uin, _noisy(base, 52))
     assert res.status_code == 200
@@ -409,7 +427,7 @@ def test_authenticate_same_face_matches_on_the_server(idrepo):
 def test_authenticate_different_face_does_not_match(idrepo):
     uin = _uin()
     base = _descriptor(60)
-    assert _enroll(uin, [base]).status_code == 200
+    _seed_gallery(idrepo, uin, [base])
 
     body = _check(uin, _descriptor(61)).json()
     assert body["isFaceMatch"] is False
@@ -422,7 +440,7 @@ def test_authenticate_different_face_does_not_match(idrepo):
 def test_authenticate_replayed_challenge_is_rejected(idrepo):
     uin = _uin()
     base = _descriptor(70)
-    assert _enroll(uin, [base]).status_code == 200
+    _seed_gallery(idrepo, uin, [base])
 
     challenge_id = _challenge("check")
     assert _check(uin, _noisy(base, 71), challenge_id).json()["isFaceMatch"] is True
@@ -515,7 +533,10 @@ def test_image_path_still_never_matches_a_descriptor_identity(idrepo):
 def test_descriptors_stay_out_of_operator_reads_and_audit(idrepo):
     uin = _uin()
     base = _descriptor(100)
-    assert _enroll(uin, [base, _noisy(base, 101)]).status_code == 200
+    enrolled = _enroll(uin, [base, _noisy(base, 101)])
+    assert enrolled.status_code == 200
+    assert enrolled.json()["recordStatus"] == "draft"
+    _seed_gallery(idrepo, uin, [base, _noisy(base, 101)])
     _check(uin, _noisy(base, 102))
     _check(uin, _descriptor(103))
 
@@ -542,7 +563,9 @@ def test_descriptors_stay_out_of_operator_reads_and_audit(idrepo):
 
     events = [e for e in audit.json() if e["uin"] == uin]
     assert [e["kind"] for e in events] == ["enroll", "authenticate", "authenticate", "operator"]
-    assert "liveness reported by browser" in events[0]["detail"]
+    assert "draft stored" in events[0]["detail"]
+    assert "browser report is not a server liveness check" in events[0]["detail"]
+    assert "biometric" not in events[0]["detail"]
     assert "match at distance" in events[1]["detail"]
     assert "no match at distance" in events[2]["detail"]
 
