@@ -93,6 +93,28 @@ def _summary_from_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _enroll_failure_summary(response) -> str:
+    """HTTP status and MOSIP error codes. The body can echo face bytes and CBEFF."""
+    status = getattr(response, "status_code", None)
+    codes: list[str] = []
+    try:
+        data = response.json()
+    except Exception:
+        data = None
+    errors = None
+    if isinstance(data, dict):
+        errors = data.get("errors")
+        if not errors and isinstance(data.get("detail"), dict):
+            errors = data["detail"].get("errors")
+    if isinstance(errors, list):
+        for err in errors:
+            if isinstance(err, dict) and err.get("errorCode"):
+                codes.append(str(err["errorCode"]))
+    if codes:
+        return f"MOSIP IDRepo returned HTTP {status}: {', '.join(codes)}"
+    return f"MOSIP IDRepo returned HTTP {status}"
+
+
 def _failure_message(response) -> str:
     try:
         data = response.json()
@@ -267,12 +289,8 @@ class IDRepoClient:
                 data = r.json()
                 if not data.get("errors"):
                     return True
-                errors = data.get("errors", [])
-                err_msgs = [e.get("message", str(e)) for e in errors]
-                remote_error = f"MOSIP IDRepo error: {', '.join(err_msgs)}"
-            else:
-                remote_error = f"MOSIP IDRepo returned HTTP {r.status_code}: {r.text[:200]}"
-            logger.warning(f"IDRepo remote enroll failed: {remote_error}")
+            remote_error = _enroll_failure_summary(r)
+            logger.warning("IDRepo remote enroll failed: %s", remote_error)
         except Exception as e:
             remote_error = f"Failed to connect to MOSIP IDRepo at '{self.base_url}': {e}"
             logger.debug(f"IDRepo remote connection failed: {e}")

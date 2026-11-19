@@ -1,3 +1,5 @@
+import logging
+
 import base64
 
 from fastapi.testclient import TestClient
@@ -132,3 +134,65 @@ def test_identity_post_does_not_persist_client_vectors():
     )
     assert bare.status_code == 200
     assert mock_client.get("/ida/v1/face-template/uin/5566-7788-9901").status_code == 404
+
+
+class _EnrollResponse:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+        self.text = body if isinstance(body, str) else str(body)
+
+    def json(self):
+        if isinstance(self._body, str):
+            raise ValueError("not json")
+        return self._body
+
+
+def _enroll_against(monkeypatch, response):
+    client = IDRepoClient(base_url="http://idrepo.test", enable_inprocess_fallback=False)
+
+    def _post(*_args, **_kwargs):
+        return response
+
+    monkeypatch.setattr("register_id.idrepo_client.requests.post", _post)
+    saved = client.add_identity(
+        uin="9000000503",
+        full_name="Leak Check",
+        email="leak@example.com",
+        face_image="data:image/jpeg;base64,bW9jay1mYWNl",
+    )
+    return client, saved
+
+
+def test_enroll_failure_log_keeps_status_and_code_only(monkeypatch, caplog):
+    leaked = "data:image/jpeg;base64,LEAKED-FACE-BYTES"
+    response = _EnrollResponse(
+        400,
+        {
+            "errors": [{
+                "errorCode": "IDR-IDC-007",
+                "message": f"rejected faceImage {leaked}",
+            }],
+            "request": {"faceImage": leaked},
+        },
+    )
+    with caplog.at_level(logging.WARNING, logger="register_id.idrepo_client"):
+        client, saved = _enroll_against(monkeypatch, response)
+
+    assert saved is False
+    assert client.last_error == "MOSIP IDRepo returned HTTP 400: IDR-IDC-007"
+    assert leaked not in (client.last_error or "")
+    assert leaked not in caplog.text
+    assert "IDR-IDC-007" in caplog.text
+
+
+def test_enroll_failure_log_drops_non_json_body(monkeypatch, caplog):
+    leaked = "<BIR>SECRET-FACE-CBEFF"
+    response = _EnrollResponse(502, f"upstream echoed {leaked}")
+    with caplog.at_level(logging.WARNING, logger="register_id.idrepo_client"):
+        client, saved = _enroll_against(monkeypatch, response)
+
+    assert saved is False
+    assert client.last_error == "MOSIP IDRepo returned HTTP 502"
+    assert leaked not in (client.last_error or "")
+    assert leaked not in caplog.text
