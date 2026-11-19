@@ -312,7 +312,10 @@ def test_enroll_with_descriptors_stores_biometric_and_engine_rows(idrepo):
     assert body["cbeffGenerated"] is True
     assert "reported by the browser" in body["message"]
 
-    assert idrepo.get_identity(uin)["status"] == "biometric"
+    stored = idrepo.get_identity(uin, include_biometrics=True)
+    assert stored["status"] == "biometric"
+    assert stored["face_image"] == _image(f"portrait-{uin}")
+    assert stored["cbeff_xml"] and "<BIR" in stored["cbeff_xml"]
     templates = idrepo.get_face_templates(uin)
     descriptor_rows = [row for row in templates if row.get("engine") == FACE_DESCRIPTOR_ENGINE]
     hash_rows = [row for row in templates if row.get("engine") == "hash"]
@@ -351,13 +354,14 @@ def test_enroll_rejects_bad_descriptor_and_failed_liveness(idrepo):
 
 def test_enroll_without_descriptors_stays_a_hash_draft(idrepo):
     uin = _uin()
+    portrait = _image(f"hash-{uin}")
     res = client.post(
         "/api/enroll",
         json={
             "uin": uin,
             "fullName": "Hash Citizen",
             "email": "hash@citizen.asia",
-            "faceImage": _image(f"hash-{uin}"),
+            "faceImage": portrait,
             "consent": _consent(),
         },
     )
@@ -365,7 +369,16 @@ def test_enroll_without_descriptors_stays_a_hash_draft(idrepo):
     body = res.json()
     assert body["recordStatus"] == "draft"
     assert "faceEngine" not in body
-    assert all("engine" not in row for row in idrepo.get_face_templates(uin))
+    stored = idrepo.get_identity(uin, include_biometrics=True)
+    assert stored["status"] == "draft"
+    assert stored["full_name"] == "Hash Citizen"
+    assert stored["email"] == "hash@citizen.asia"
+    assert not stored.get("face_image")
+    assert not stored.get("cbeff_xml")
+    assert portrait not in json.dumps(stored)
+    templates = idrepo.get_face_templates(uin)
+    assert templates
+    assert all("engine" not in row for row in templates)
 
 
 # Authenticate

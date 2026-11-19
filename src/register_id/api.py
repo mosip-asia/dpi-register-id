@@ -307,12 +307,16 @@ def _store_identity(
     templates: list[dict],
     record_status: str,
 ) -> None:
+    # Draft means demographics only. Face bytes and CBEFF are written only
+    # when presentation passed and the status is biometric. Hash templates on
+    # a draft are a duplicate-byte check, not a face image or CBEFF record.
+    store_biometrics = record_status == "biometric"
     saved = idrepo.add_identity(
         uin=req.uin,
         full_name=req.fullName,
         email=req.email,
-        face_image=req.faceImage,
-        cbeff_xml=cbeff_xml,
+        face_image=req.faceImage if store_biometrics else None,
+        cbeff_xml=cbeff_xml if store_biometrics else None,
         templates=templates,
         status=record_status,
     )
@@ -412,10 +416,11 @@ def enroll_citizen_endpoint(req: EnrollRequest):
     Enrolls a citizen face through the MOSIP IDRepo REST interface:
     1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
     2. Without faceDescriptors: computes hash templates from the image bytes
-       and stores a draft.
+       and stores a draft. The face image and CBEFF are not written.
        With faceDescriptors and liveness: checks the browser liveness report
        against its challenge, stores face-api-128 descriptors as templates,
-       and marks the record biometric.
+       and marks the record biometric. The face image and CBEFF are written
+       with that biometric record.
     3. Persists demographics on the identity and templates on the IDA table.
 
     Keycloak login is a separate POST /api/credentials call. No password is accepted here.
@@ -437,7 +442,8 @@ def enroll_citizen_endpoint(req: EnrollRequest):
 
     # The hash templates are a duplicate-byte check on a draft. They are not a
     # biometric of record: presentation has not passed and the engine cannot
-    # identify a face, so status stays draft.
+    # identify a face, so status stays draft and the face image and CBEFF are
+    # left out of the IDRepo write.
     record_status = "biometric" if may_store_biometric_record(False, False) else "draft"
     templates = _templates_for_enrollment(req)
     _store_identity(idrepo, req, cbeff_xml, templates, record_status)
@@ -453,7 +459,7 @@ def enroll_citizen_endpoint(req: EnrollRequest):
     return _with_email(
         {
             "status": "SUCCESS",
-            "message": "Citizen face stored as a draft via MOSIP IDRepo interface",
+            "message": "Citizen demographics stored as a draft via MOSIP IDRepo interface",
             "uin": req.uin,
             "fullName": req.fullName,
             "backend": "mosip-idrepo-rest",
