@@ -4,6 +4,15 @@ Audit trail for enrollment and credential-issue attempts.
 Each record stores kind, actor, uin, timestamp, result, and a short detail.
 Face images, embeddings, CBEFF payloads, passwords, and tokens are never written.
 
+Rows are kept for 30 days (``AUDIT_RETENTION_SECONDS``). That matches the
+draft-application lifetime because this repository has no separate audit
+retention policy. On append and on read, a row older than that is removed from
+the Redis list and from ``audit.jsonl``, including a row that is already
+expired when it is written. A lone expired write therefore leaves no UIN
+behind. ``list_events`` does not return it. The Redis key itself has no TTL:
+an ``EXPIRE`` refreshed by every append would keep a busy log forever, and a
+quiet log would delete fresh rows with the old ones.
+
 Storage follows the process environment unless a test injects a store or a directory:
 - REDIS_URL set: append to the Redis list ``register-id:audit`` and read it back.
   A down Redis raises. There is no silent file fallback.
@@ -20,12 +29,15 @@ import json
 import os
 import tempfile
 import threading
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 REDIS_AUDIT_KEY = "register-id:audit"
+# Same 30-day lifetime as draft applications. No separate audit policy exists.
+AUDIT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _AUDIT_FILENAME = "audit.jsonl"
 _KINDS = frozenset({"enroll", "credential", "authenticate", "operator"})
 _RESULTS = frozenset({"success", "failure"})
@@ -65,7 +77,8 @@ def record_event(
     Append one enroll or credential attempt and return the stored record.
 
     ``event`` must carry kind, actor, uin, and result. timestamp defaults to
-    the current unix time. detail defaults to an empty string.
+    the current unix time. A timestamp already older than the retention window
+    is not written. detail defaults to an empty string.
 
     Mappings that contain a secret key (password, faceImage, image, embedding,
     cbeff, authorization, token, including nested keys) are rejected and not
@@ -90,10 +103,13 @@ def list_events(
     Return stored audit records, oldest first and newest last.
 
     ``limit`` keeps the newest ``limit`` records. ``None`` returns the whole log.
+    Rows older than ``AUDIT_RETENTION_SECONDS`` are left out.
     """
     _check_limit(limit)
     lines = _open_store(store, path).read(limit)
-    return [_project_line(line) for line in lines]
+    cutoff = _retention_cutoff()
+    records = [_project_line(line) for line in lines]
+    return [record for record in records if record["timestamp"] >= cutoff]
 
 
 class FileAuditStore:
@@ -107,24 +123,54 @@ class FileAuditStore:
         if "\n" in line or "\r" in line:
             raise ValueError("audit line must be a single line")
         with _file_lock:
+            cutoff = _retention_cutoff()
+            existing = self._read_lines_locked()
+            kept, dropped = _without_expired(existing, cutoff)
+            # An already-expired line is not stored. Prune still runs so older
+            # UINs do not remain when this write is the only one that happens.
+            if _line_expired(line, cutoff):
+                if dropped:
+                    self.directory.mkdir(parents=True, exist_ok=True)
+                    self._write_lines_locked(kept)
+                return
             self.directory.mkdir(parents=True, exist_ok=True)
-            with self.file_path.open("a", encoding="utf-8") as handle:
-                handle.write(line + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+            if dropped:
+                self._write_lines_locked([*kept, line])
+            else:
+                self._append_line_locked(line)
 
     def read(self, limit: int | None = None) -> list[str]:
         _check_limit(limit)
         with _file_lock:
-            if not self.file_path.is_file():
-                return []
-            text = self.file_path.read_text(encoding="utf-8")
-        lines = [line for line in text.splitlines() if line.strip()]
+            existing = self._read_lines_locked()
+            kept, dropped = _without_expired(existing, _retention_cutoff())
+            if dropped:
+                self._write_lines_locked(kept)
+            lines = kept
         if limit is None:
             return lines
         if limit == 0:
             return []
         return lines[-limit:]
+
+    def _read_lines_locked(self) -> list[str]:
+        if not self.file_path.is_file():
+            return []
+        text = self.file_path.read_text(encoding="utf-8")
+        return [line for line in text.splitlines() if line.strip()]
+
+    def _append_line_locked(self, line: str) -> None:
+        with self.file_path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def _write_lines_locked(self, lines: list[str]) -> None:
+        payload = "".join(f"{line}\n" for line in lines)
+        with self.file_path.open("w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
 
 
 class RedisAuditStore:
@@ -138,7 +184,10 @@ class RedisAuditStore:
     def append(self, line: str) -> None:
         client = self._connect()
         try:
-            client.rpush(REDIS_AUDIT_KEY, line)
+            cutoff = _retention_cutoff()
+            self._prune(client, cutoff)
+            if not _line_expired(line, cutoff):
+                client.rpush(REDIS_AUDIT_KEY, line)
         finally:
             client.close()
 
@@ -146,15 +195,31 @@ class RedisAuditStore:
         _check_limit(limit)
         client = self._connect()
         try:
-            if limit == 0:
-                return []
-            if limit is None:
-                raw = client.lrange(REDIS_AUDIT_KEY, 0, -1)
-            else:
-                raw = client.lrange(REDIS_AUDIT_KEY, -limit, -1)
+            lines = self._prune(client)
         finally:
             client.close()
-        return [_decode_redis_value(item) for item in raw]
+        if limit is None:
+            return lines
+        if limit == 0:
+            return []
+        return lines[-limit:]
+
+    def _prune(self, client: Any, cutoff: float | None = None) -> list[str]:
+        """Drop expired rows and return the list, oldest first.
+
+        Expired rows are removed wherever they sit. Append order of the rows
+        that remain is unchanged, so the head stays the oldest survivor.
+        """
+        if cutoff is None:
+            cutoff = _retention_cutoff()
+        raw = client.lrange(REDIS_AUDIT_KEY, 0, -1)
+        lines = [_decode_redis_value(item) for item in raw]
+        kept, dropped = _without_expired(lines, cutoff)
+        if dropped:
+            client.delete(REDIS_AUDIT_KEY)
+            for item in kept:
+                client.rpush(REDIS_AUDIT_KEY, item)
+        return kept
 
     def _connect(self) -> Any:
         import redis
@@ -243,10 +308,37 @@ def _require_text(value: Any, field: str, max_len: int, *, allow_empty: bool) ->
     return cleaned
 
 
+def _retention_cutoff() -> float:
+    return time.time() - AUDIT_RETENTION_SECONDS
+
+
+def _line_expired(line: str, cutoff: float) -> bool:
+    """Whether a well-formed row is older than ``cutoff``.
+
+    A line ``_project_line`` rejects is kept. The existing corrupt-record
+    error still surfaces when that line is read back, and the message stays
+    free of images and secrets.
+    """
+    try:
+        record = _project_line(line)
+    except ValueError:
+        return False
+    return record["timestamp"] < cutoff
+
+
+def _without_expired(lines: list[str], cutoff: float) -> tuple[list[str], bool]:
+    kept: list[str] = []
+    dropped = False
+    for line in lines:
+        if _line_expired(line, cutoff):
+            dropped = True
+            continue
+        kept.append(line)
+    return kept, dropped
+
+
 def _require_timestamp(value: Any) -> float:
     if value is None:
-        import time
-
         value = time.time()
     # bool is an int subclass and is not a unix time.
     if isinstance(value, bool) or not isinstance(value, (int, float)):

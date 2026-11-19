@@ -5,12 +5,13 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
 import redis
 
-from register_id.audit import REDIS_AUDIT_KEY, list_events, record_event
+from register_id.audit import AUDIT_RETENTION_SECONDS, REDIS_AUDIT_KEY, list_events, record_event
 
 
 SECRET = "SuperSecretPassword!"
@@ -60,6 +61,12 @@ class FakeRedis:
     def close(self) -> None:
         return None
 
+    def delete(self, key: str) -> int:
+        if key in self.lists:
+            del self.lists[key]
+            return 1
+        return 0
+
 
 class DownRedis:
     def rpush(self, key: str, value: str) -> int:
@@ -85,7 +92,7 @@ def _event(**overrides: object) -> dict:
         "uin": "123456789012",
         "result": "success",
         "detail": "idrepo accepted",
-        "timestamp": 1_700_000_000.5,
+        "timestamp": float(int(time.time())),
     }
     event.update(overrides)
     return event
@@ -93,18 +100,19 @@ def _event(**overrides: object) -> dict:
 
 def test_memory_store_appends_in_order_and_limits_from_the_tail() -> None:
     store = MemoryStore()
-    first = record_event(_event(detail="first", timestamp=10.0), store=store)
+    base = float(int(time.time()))
+    first = record_event(_event(detail="first", timestamp=base), store=store)
     second = record_event(
         _event(
             kind="credential",
             actor="operator-42",
             result="failure",
             detail="keycloak rejected",
-            timestamp=9.0,
+            timestamp=base - 30,
         ),
         store=store,
     )
-    third = record_event(_event(detail="third", timestamp=11.0), store=store)
+    third = record_event(_event(detail="third", timestamp=base + 30), store=store)
 
     listed = list_events(store=store)
     assert listed == [first, second, third]
@@ -231,13 +239,14 @@ record_event(
         "uin": "99887766",
         "result": "failure",
         "detail": "keycloak down",
-        "timestamp": 1700000000.5,
+        "timestamp": float(sys.argv[2]),
     },
     path=sys.argv[1],
 )
 """
+    stamp = float(int(time.time())) + 0.5
     wrote = subprocess.run(
-        [sys.executable, "-c", writer, str(tmp_path)],
+        [sys.executable, "-c", writer, str(tmp_path), str(stamp)],
         capture_output=True,
         text=True,
         env=env,
@@ -251,7 +260,7 @@ record_event(
             "kind": "credential",
             "actor": "operator-7",
             "uin": "99887766",
-            "timestamp": 1700000000.5,
+            "timestamp": stamp,
             "result": "failure",
             "detail": "keycloak down",
         }
@@ -292,9 +301,16 @@ def test_redis_list_is_appended_and_read_back(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: fake)
 
-    first = record_event(_event(detail="redis-1", timestamp=1.25))
+    base = float(int(time.time()))
+    first = record_event(_event(detail="redis-1", timestamp=base + 0.25))
     second = record_event(
-        _event(kind="credential", actor="operator-9", result="success", detail="redis-2", timestamp=2.5)
+        _event(
+            kind="credential",
+            actor="operator-9",
+            result="success",
+            detail="redis-2",
+            timestamp=base + 0.5,
+        )
     )
 
     assert set(fake.lists) == {REDIS_AUDIT_KEY}
@@ -335,3 +351,190 @@ def test_invalid_event_is_not_stored() -> None:
     with pytest.raises(ValueError):
         list_events(-1, store=store)
     assert store.lines == []
+
+
+def _stamp() -> float:
+    return float(int(time.time()))
+
+
+def test_list_events_drops_expired_rows_and_keeps_fresh_ones() -> None:
+    store = MemoryStore()
+    now = _stamp()
+    record_event(
+        _event(detail="stale", uin="100000000001", timestamp=now - AUDIT_RETENTION_SECONDS - 5),
+        store=store,
+    )
+    fresh = record_event(_event(detail="fresh", uin="100000000002", timestamp=now), store=store)
+    boundary = record_event(
+        _event(
+            detail="boundary",
+            uin="100000000003",
+            timestamp=now - AUDIT_RETENTION_SECONDS + 120,
+        ),
+        store=store,
+    )
+    assert list_events(store=store) == [fresh, boundary]
+
+
+def test_file_audit_drops_expired_rows_on_append_and_read(tmp_path: Path) -> None:
+    now = _stamp()
+    expired_at = now - AUDIT_RETENTION_SECONDS - 5
+    audit_file = tmp_path / "audit.jsonl"
+    record_event(
+        _event(detail="stale", uin="100000000001", timestamp=expired_at),
+        path=tmp_path,
+    )
+    assert not audit_file.exists()
+
+    record_event(_event(detail="fresh", uin="100000000002", timestamp=now), path=tmp_path)
+    after_fresh = audit_file.read_text(encoding="utf-8")
+    assert "100000000001" not in after_fresh
+    assert "100000000002" in after_fresh
+
+    record_event(
+        _event(detail="stale-again", uin="100000000001", timestamp=expired_at),
+        path=tmp_path,
+    )
+    after_append = audit_file.read_text(encoding="utf-8")
+    assert "100000000001" not in after_append
+    assert "100000000002" in after_append
+    assert [event["uin"] for event in list_events(path=tmp_path)] == ["100000000002"]
+
+    planted = {
+        "kind": "authenticate",
+        "actor": "citizen",
+        "uin": "100000000003",
+        "timestamp": expired_at,
+        "result": "failure",
+        "detail": "planted",
+    }
+    with (tmp_path / "audit.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(planted) + "\n")
+    record_event(
+        _event(detail="fresh-2", uin="100000000004", timestamp=now + 1),
+        path=tmp_path,
+    )
+    after_rewrite = audit_file.read_text(encoding="utf-8")
+    assert "100000000003" not in after_rewrite
+    assert "100000000004" in after_rewrite
+
+    with (tmp_path / "audit.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(planted) + "\n")
+    assert list_events(0, path=tmp_path) == []
+    remaining = (tmp_path / "audit.jsonl").read_text(encoding="utf-8")
+    assert "100000000003" not in remaining
+    assert "100000000002" in remaining
+    assert [event["detail"] for event in list_events(path=tmp_path)] == ["fresh", "fresh-2"]
+
+
+def test_timestamp_exactly_on_the_cutoff_is_kept(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    frozen = 1_800_000_000.0
+    monkeypatch.setattr("register_id.audit.time.time", lambda: frozen)
+    cutoff = frozen - AUDIT_RETENTION_SECONDS
+    record_event(
+        _event(detail="on-cutoff", uin="100000000010", timestamp=cutoff),
+        path=tmp_path,
+    )
+    record_event(
+        _event(detail="just-older", uin="100000000011", timestamp=cutoff - 0.001),
+        path=tmp_path,
+    )
+    text = (tmp_path / "audit.jsonl").read_text(encoding="utf-8")
+    assert "100000000010" in text
+    assert "100000000011" not in text
+    assert [event["detail"] for event in list_events(path=tmp_path)] == ["on-cutoff"]
+
+
+def test_redis_audit_drops_expired_rows_on_append_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: fake)
+    now = _stamp()
+    expired_at = now - AUDIT_RETENTION_SECONDS - 5
+
+    record_event(_event(detail="stale", uin="100000000002", timestamp=expired_at))
+    assert REDIS_AUDIT_KEY not in fake.lists
+
+    record_event(_event(detail="fresh-1", uin="100000000001", timestamp=now))
+    record_event(_event(detail="stale-again", uin="100000000002", timestamp=expired_at))
+    assert "100000000002" not in "\n".join(fake.lists[REDIS_AUDIT_KEY])
+    assert "100000000001" in "\n".join(fake.lists[REDIS_AUDIT_KEY])
+
+    fake.lists[REDIS_AUDIT_KEY].append(
+        json.dumps(
+            {
+                "kind": "enroll",
+                "actor": "citizen",
+                "uin": "100000000002",
+                "timestamp": expired_at,
+                "result": "failure",
+                "detail": "already-there",
+            }
+        )
+    )
+    record_event(_event(detail="fresh-2", uin="100000000003", timestamp=now + 1))
+    blob = "\n".join(fake.lists[REDIS_AUDIT_KEY])
+    assert "100000000002" not in blob
+    assert [event["uin"] for event in list_events()] == ["100000000001", "100000000003"]
+
+    fake.lists[REDIS_AUDIT_KEY].append(
+        json.dumps(
+            {
+                "kind": "operator",
+                "actor": "operator-1",
+                "uin": "100000000004",
+                "timestamp": expired_at,
+                "result": "failure",
+                "detail": "planted",
+            }
+        )
+    )
+    assert [event["uin"] for event in list_events()] == ["100000000001", "100000000003"]
+    assert "100000000004" not in "\n".join(fake.lists[REDIS_AUDIT_KEY])
+    assert fake.lists[REDIS_AUDIT_KEY][0].find("100000000001") != -1
+    assert fake.lists[REDIS_AUDIT_KEY][-1].find("100000000003") != -1
+
+
+def test_retention_prune_still_rejects_a_corrupt_audit_line(tmp_path: Path) -> None:
+    now = _stamp()
+    record_event(_event(detail="kept", uin="100000000009", timestamp=now), path=tmp_path)
+    missing_timestamp = {
+        "kind": "enroll",
+        "actor": "citizen",
+        "uin": "100000000008",
+        "result": "success",
+        "detail": "no-time",
+    }
+    expired = _event(
+        detail="stale",
+        uin="100000000006",
+        timestamp=now - AUDIT_RETENTION_SECONDS - 5,
+    )
+    file_path = tmp_path / "audit.jsonl"
+    with file_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(expired) + "\n")
+        handle.write(json.dumps(missing_timestamp) + "\n")
+
+    with pytest.raises(ValueError, match="corrupt audit record") as missing:
+        list_events(path=tmp_path)
+    assert FACE not in str(missing.value)
+    assert SECRET not in str(missing.value)
+
+    text = file_path.read_text(encoding="utf-8")
+    assert "100000000006" not in text
+    assert "100000000009" in text
+    assert "no-time" in text
+
+    bad_timestamp = _event(detail="bad-time", uin="100000000007", timestamp=now)
+    bad_timestamp["timestamp"] = "not-a-time"
+    kept_line = file_path.read_text(encoding="utf-8").splitlines()[0]
+    file_path.write_text(
+        kept_line + "\n" + json.dumps(bad_timestamp) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="timestamp must be a unix time") as invalid:
+        list_events(path=tmp_path)
+    assert "not-a-time" not in str(invalid.value)
+    assert FACE not in str(invalid.value)
