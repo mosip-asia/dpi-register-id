@@ -13,6 +13,7 @@ from project.web import app
 from register_id.email import registration_qr_png
 from register_id.face_descriptor import FACE_DESCRIPTOR_ENGINE
 from register_id.idrepo_client import IDRepoClient
+from register_id.tests.conftest import enroll_headers
 
 client = TestClient(app)
 
@@ -99,7 +100,7 @@ def _enroll(uin: str, **extra) -> object:
         "consent": _consent(),
     }
     body.update(extra)
-    return client.post("/api/enroll", json=body)
+    return client.post("/api/enroll", json=body, headers=enroll_headers())
 
 
 def test_registration_qr_is_the_uin_and_not_a_micro_symbol():

@@ -94,7 +94,9 @@ def test_idrepo_client_crud_flow():
     assert by_sector["front"] == [0.13] * 128
     assert set(by_sector) == {"far-left", "left", "front", "right", "far-right"}
 
-    identities = client.list_identities(limit=10)
+    # Same-second inserts share CURRENT_TIMESTAMP. A short page can omit the
+    # row just written when the suite enrolls more than `limit` identities.
+    identities = client.list_identities(limit=200)
     assert any(i["uin"] == uin for i in identities)
 
     missing = mock_client.get("/ida/v1/face-template/uin/0000-not-enrolled")

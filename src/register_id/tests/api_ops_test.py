@@ -5,6 +5,7 @@ import base64
 from fastapi.testclient import TestClient
 from project.web import app
 from register_id.idrepo_client import IDRepoClient
+from register_id.tests.conftest import enroll_headers
 from register_id.keycloak import ProvisionResult
 
 client = TestClient(app)
@@ -18,6 +19,7 @@ def _image() -> str:
 def _enroll(uin: str) -> None:
     res = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": uin,
             "fullName": "Ops Citizen",

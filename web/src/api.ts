@@ -78,10 +78,20 @@ async function readError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, message);
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+function enrollAuthHeaders(): Record<string, string> | undefined {
+  const token = import.meta.env.VITE_REGISTER_ID_ENROLL_TOKEN;
+  if (typeof token !== "string" || token.length === 0) return undefined;
+  return { Authorization: `Bearer ${token}` };
+}
+
+async function postJson<T>(
+  url: string,
+  body: unknown,
+  headers?: Record<string, string>,
+): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
   if (!response.ok) throw await readError(response);
@@ -135,7 +145,7 @@ export function enrollCitizen(input: {
     liveness: input.liveness,
     emailIdCard,
     ...(emailIdCard && input.idCardImage ? { idCardImage: input.idCardImage } : {}),
-  });
+  }, enrollAuthHeaders());
 }
 
 export function verifyFace(input: { uin: string; probeDescriptor: number[]; liveness: LivenessReport }) {

@@ -1232,10 +1232,14 @@
     };
     if (faceViews) enrollPayload.faceViews = faceViews;
 
+    const enrollToken = {{ enroll_token | tojson }};
+    const enrollHeaders = { 'Content-Type': 'application/json' };
+    if (enrollToken) enrollHeaders.Authorization = 'Bearer ' + enrollToken;
+
     try {
       const res = await fetch('/api/enroll', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: enrollHeaders,
         body: JSON.stringify(enrollPayload)
       });
       const data = await res.json();

@@ -26,6 +26,7 @@ from register_id.face_descriptor import (
     validate_descriptor,
 )
 from register_id.idrepo_client import IDRepoClient
+from register_id.tests.conftest import enroll_headers
 from register_id.models import ClientLiveness
 from register_id.tests.challenge_store_test import FakeRedis
 
@@ -102,7 +103,7 @@ def _enroll(uin: str, descriptors: list[list[float]], **overrides) -> object:
         "consent": _consent(),
     }
     body.update(overrides)
-    return client.post("/api/enroll", json=body)
+    return client.post("/api/enroll", json=body, headers=enroll_headers())
 
 
 def _seed_gallery(idrepo: IDRepoClient, uin: str, descriptors: list[list[float]]) -> None:
@@ -306,7 +307,7 @@ def test_enroll_requires_descriptors_and_liveness_together(idrepo):
         "liveness": _liveness(_challenge("enroll")),
         "consent": _consent(),
     }
-    only_liveness = client.post("/api/enroll", json=body)
+    only_liveness = client.post("/api/enroll", json=body, headers=enroll_headers())
     assert only_liveness.status_code == 422
     assert idrepo.get_identity(uin) is None
 
@@ -375,6 +376,7 @@ def test_enroll_without_descriptors_stays_a_hash_draft(idrepo):
     portrait = _image(f"hash-{uin}")
     res = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": uin,
             "fullName": "Hash Citizen",
@@ -461,6 +463,7 @@ def test_authenticate_hash_only_identity_asks_to_enroll_again(idrepo):
     uin = _uin()
     enrolled = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": uin,
             "fullName": "Hash Only",

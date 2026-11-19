@@ -4,6 +4,7 @@ from project.web import app
 from pydantic import ValidationError
 from register_id.consent import ConsentRecord, validate_consent
 from register_id.idrepo_client import IDRepoClient
+from register_id.tests.conftest import enroll_headers
 from register_id.models import EnrollRequest
 
 client = TestClient(app)
@@ -114,6 +115,7 @@ def test_refused_or_missing_consent_stores_no_face():
 
     refused = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": refused_uin,
             "fullName": "Refused Citizen",
@@ -124,6 +126,7 @@ def test_refused_or_missing_consent_stores_no_face():
     )
     missing = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": missing_uin,
             "fullName": "Missing Consent",

@@ -1,10 +1,23 @@
 import base64
 import json
 
+import pytest
 from fastapi.testclient import TestClient
+from redis.exceptions import RedisError
 from project.web import app
 from register_id.embedder import embed_face_image
+from register_id.enroll_limit import (
+    ENROLL_LIMIT_WINDOW_SECONDS,
+    ENROLL_SUCCESS_LIMIT,
+    EnrollLimitExceeded,
+    EnrollLimitUnavailable,
+    RedisEnrollLimiter,
+    ensure_enroll_allowed,
+    record_enroll_success,
+    reset_enroll_limits,
+)
 from register_id.idrepo_client import IDRepoClient
+from register_id.tests.conftest import TEST_ENROLL_TOKEN, enroll_headers
 
 client = TestClient(app)
 
@@ -59,7 +72,7 @@ def test_api_enroll_and_authenticate_flow(monkeypatch):
         "consent": _consent(),
     }
 
-    enroll_res = client.post("/api/enroll", json=enroll_payload)
+    enroll_res = client.post("/api/enroll", headers=enroll_headers(), json=enroll_payload)
     assert enroll_res.status_code == 200
     enroll_data = enroll_res.json()
     assert enroll_data["status"] == "SUCCESS"
@@ -146,6 +159,7 @@ def test_api_enroll_and_authenticate_head_sweep():
 
     enroll_res = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": uin,
             "fullName": "Sweep Citizen",
@@ -175,6 +189,7 @@ def test_api_enroll_and_authenticate_head_sweep():
 
     weak_turn = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": "9876-5432-1101",
             "fullName": "Weak Turn",
@@ -199,6 +214,7 @@ def test_api_enroll_and_authenticate_head_sweep():
             view["image"] = copied_image
     copied = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": "9876-5432-1102",
             "fullName": "Copied Pose",
@@ -324,9 +340,9 @@ def test_enroll_rejects_password_and_client_embedding():
         "faceImage": image,
         "consent": _consent(),
     }
-    with_password = client.post("/api/enroll", json={**base, "password": "SecretPassword123!"})
+    with_password = client.post("/api/enroll", headers=enroll_headers(), json={**base, "password": "SecretPassword123!"})
     assert with_password.status_code == 422
-    with_embedding = client.post("/api/enroll", json={**base, "faceEmbedding": [0.1] * 128})
+    with_embedding = client.post("/api/enroll", headers=enroll_headers(), json={**base, "faceEmbedding": [0.1] * 128})
     assert with_embedding.status_code == 422
 
 
@@ -346,6 +362,7 @@ def test_api_credentials_issue_after_enroll():
 
     enroll_res = client.post(
         "/api/enroll",
+        headers=enroll_headers(),
         json={
             "uin": uin,
             "fullName": "Credential Citizen",
@@ -364,3 +381,163 @@ def test_api_credentials_issue_after_enroll():
     stored = IDRepoClient(enable_inprocess_fallback=True).get_identity(uin)
     assert stored is not None
     assert password not in json.dumps(stored)
+
+
+def _enroll_body(uin: str, *, accepted: bool = True) -> dict:
+    consent = _consent()
+    consent["accepted"] = accepted
+    return {
+        "uin": uin,
+        "fullName": "Limited Citizen",
+        "email": "limited@citizen.asia",
+        "faceImage": _data_url(b"enroll-limit-face-marker"),
+        "consent": consent,
+    }
+
+
+def _stored(uin: str):
+    return IDRepoClient(enable_inprocess_fallback=True).get_identity(uin)
+
+
+def test_enroll_requires_the_enroll_token_and_stores_nothing(monkeypatch):
+    uin = "4290-0000-8001"
+    body = _enroll_body(uin)
+
+    missing = client.post("/api/enroll", json=body)
+    wrong = client.post("/api/enroll", json=body, headers=enroll_headers("other-enroll-token"))
+    monkeypatch.setenv("REGISTER_ID_ENROLL_TOKEN", "")
+    empty = client.post("/api/enroll", json=body, headers=enroll_headers())
+    monkeypatch.delenv("REGISTER_ID_ENROLL_TOKEN", raising=False)
+    unset = client.post("/api/enroll", json=body, headers=enroll_headers())
+
+    face = body["faceImage"]
+    for response in (missing, wrong, empty, unset):
+        assert response.status_code == 401
+        text = response.text
+        assert TEST_ENROLL_TOKEN not in text
+        assert "other-enroll-token" not in text
+        assert face not in text
+    assert missing.json()["detail"] == "missing enroll token"
+    assert wrong.json()["detail"] == "invalid enroll token"
+    assert empty.json()["detail"] == "invalid enroll token"
+    assert unset.json()["detail"] == "invalid enroll token"
+    assert _stored(uin) is None
+
+
+def test_enroll_rate_limit_blocks_the_31st_success_and_ignores_validation_failures(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    rejected = client.post(
+        "/api/enroll",
+        headers=enroll_headers(),
+        json=_enroll_body("4290-0000-8100", accepted=False),
+    )
+    assert rejected.status_code == 422
+    assert _stored("4290-0000-8100") is None
+
+    for index in range(ENROLL_SUCCESS_LIMIT):
+        uin = f"4291-{index:04d}-0000"
+        response = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body(uin))
+        assert response.status_code == 200, response.text
+        assert _stored(uin) is not None
+
+    blocked_uin = "4291-0030-0000"
+    blocked = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body(blocked_uin))
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"] == "Enrollment rate limit exceeded."
+    assert TEST_ENROLL_TOKEN not in blocked.text
+    assert _enroll_body(blocked_uin)["faceImage"] not in blocked.text
+    assert _stored(blocked_uin) is None
+
+
+def test_memory_enroll_window_resets_when_the_hour_passes(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    reset_enroll_limits()
+    token = "window-token"
+    opened = 1_000.0
+    for _ in range(ENROLL_SUCCESS_LIMIT):
+        ensure_enroll_allowed(token, now=opened)
+        record_enroll_success(token, now=opened)
+    with pytest.raises(EnrollLimitExceeded):
+        ensure_enroll_allowed(token, now=opened + ENROLL_LIMIT_WINDOW_SECONDS - 1)
+    ensure_enroll_allowed(token, now=opened + ENROLL_LIMIT_WINDOW_SECONDS)
+
+
+def test_enroll_limit_uses_redis_and_fails_closed_when_it_is_down(monkeypatch):
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.values: dict[str, str] = {}
+            self.expires: dict[str, int] = {}
+
+        def get(self, name: str) -> str | None:
+            return self.values.get(name)
+
+        def incr(self, name: str) -> int:
+            count = int(self.values.get(name, "0")) + 1
+            self.values[name] = str(count)
+            return count
+
+        def expire(self, name: str, seconds: int) -> bool:
+            self.expires[name] = seconds
+            return True
+
+    class DownRedis:
+        def get(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RedisError("connection refused")
+
+        def incr(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RedisError("connection refused")
+
+        def expire(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RedisError("connection refused")
+
+    fake = FakeRedis()
+    holder = {"client": fake}
+
+    def selected() -> RedisEnrollLimiter:
+        return RedisEnrollLimiter(client=holder["client"])
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setattr("register_id.enroll_limit.get_enroll_limiter", selected)
+
+    uin = "4292-0000-0001"
+    saved = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body(uin))
+    assert saved.status_code == 200
+    assert len(fake.values) == 1
+    key, value = next(iter(fake.values.items()))
+    assert value == "1"
+    assert fake.expires[key] == ENROLL_LIMIT_WINDOW_SECONDS
+    assert TEST_ENROLL_TOKEN not in key
+    assert _enroll_body(uin)["faceImage"] not in key
+    assert _stored(uin) is not None
+
+    holder["client"] = DownRedis()
+    blocked_uin = "4292-0000-0002"
+    down = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body(blocked_uin))
+    assert down.status_code == 503
+    assert down.json()["detail"] == "Enrollment limit store is unavailable."
+    assert TEST_ENROLL_TOKEN not in down.text
+    assert _enroll_body(blocked_uin)["faceImage"] not in down.text
+    assert _stored(blocked_uin) is None
+
+
+def test_configured_redis_is_required_for_the_enroll_limit(monkeypatch):
+    """REDIS_URL selects Redis, and a down counter is not replaced with memory."""
+
+    class DownRedis:
+        def get(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RedisError("connection refused")
+
+    monkeypatch.setenv("REDIS_URL", "redis://limiter.internal:6379/0")
+    reset_enroll_limits()
+
+    def use_down(self, url: str | None = None, *, client: object = None) -> None:
+        del url, client
+        self._client = DownRedis()
+
+    monkeypatch.setattr(RedisEnrollLimiter, "__init__", use_down)
+    with pytest.raises(EnrollLimitUnavailable):
+        ensure_enroll_allowed(TEST_ENROLL_TOKEN)

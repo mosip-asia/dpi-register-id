@@ -40,6 +40,7 @@ async def get_index(request: Request):
     context = {
         "build_version": _BUILD_VERSION,
         "environment": _ENVIRONMENT,
+        "enroll_token": os.environ.get("REGISTER_ID_ENROLL_TOKEN", ""),
     }
     return templates.TemplateResponse(request=request, name="index.html", context=context)
 
@@ -49,6 +50,7 @@ async def get_lab(request: Request):
     context = {
         "build_version": _BUILD_VERSION,
         "environment": _ENVIRONMENT,
+        "enroll_token": os.environ.get("REGISTER_ID_ENROLL_TOKEN", ""),
     }
     return templates.TemplateResponse(request=request, name="index.html", context=context)
 

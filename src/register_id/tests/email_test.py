@@ -12,6 +12,7 @@ from register_id.email import (
     registration_qr_png,
     send_enrollment_email,
 )
+from register_id.tests.conftest import enroll_headers
 
 client = TestClient(app)
 
@@ -246,7 +247,7 @@ def test_enroll_bad_id_card_image_still_succeeds(monkeypatch: pytest.MonkeyPatch
         "emailIdCard": True,
         "idCardImage": _png_data_url(b"not-a-png"),
     }
-    response = client.post("/api/enroll", json=payload)
+    response = client.post("/api/enroll", headers=enroll_headers(), json=payload)
     assert response.status_code == 200
     assert response.json()["status"] == "SUCCESS"
     assert captured["email_id_card"] is True
@@ -263,7 +264,7 @@ def test_enroll_bad_id_card_image_still_succeeds(monkeypatch: pytest.MonkeyPatch
         "emailIdCard": True,
         "idCardImage": _png_data_url(oversized),
     }
-    oversized_response = client.post("/api/enroll", json=oversized_payload)
+    oversized_response = client.post("/api/enroll", headers=enroll_headers(), json=oversized_payload)
     assert oversized_response.status_code == 200
     assert captured["email_id_card"] is True
     assert captured["id_card_png"] is None
@@ -280,7 +281,7 @@ def test_enroll_email_id_card_false_drops_image(monkeypatch: pytest.MonkeyPatch)
         "emailIdCard": False,
         "idCardImage": _png_data_url(_TINY_PNG),
     }
-    response = client.post("/api/enroll", json=payload)
+    response = client.post("/api/enroll", headers=enroll_headers(), json=payload)
     assert response.status_code == 200
     assert captured["to"] == "no-card@citizen.asia"
     assert captured["full_name"] == "No Card Mail"
@@ -325,7 +326,7 @@ def test_enroll_includes_email_result(monkeypatch: pytest.MonkeyPatch):
         "faceImage": _data_url(b"mock-face-bytes-email"),
         "consent": _consent(),
     }
-    response = client.post("/api/enroll", json=payload)
+    response = client.post("/api/enroll", headers=enroll_headers(), json=payload)
     assert response.status_code == 200
     body = response.json()
     assert body["emailSent"] is True
@@ -344,7 +345,7 @@ def test_enroll_succeeds_when_email_skipped(monkeypatch: pytest.MonkeyPatch):
         "faceImage": _data_url(b"mock-face-bytes-email-skip"),
         "consent": _consent(),
     }
-    response = client.post("/api/enroll", json=payload)
+    response = client.post("/api/enroll", headers=enroll_headers(), json=payload)
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "SUCCESS"
