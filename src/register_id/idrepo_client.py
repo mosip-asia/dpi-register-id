@@ -351,11 +351,17 @@ class IDRepoClient:
         """
         Load match vectors from GET /ida/v1/face-template/uin/{uin}.
 
-        Remote is tried first, then the in-process mock. An empty list means
-        the UIN has no templates (or both calls failed).
+        The mock omits embeddings unless this call asks for them. Remote is
+        tried first, then the in-process mock. An empty list means the UIN has
+        no templates (or both calls failed).
         """
+        params = {"includeBiometrics": "true"}
         try:
-            r = requests.get(f"{self.base_url}/ida/v1/face-template/uin/{uin}", timeout=3)
+            r = requests.get(
+                f"{self.base_url}/ida/v1/face-template/uin/{uin}",
+                params=params,
+                timeout=3,
+            )
             if r.status_code == 200:
                 return _templates_from_body(r.json())
         except Exception as e:
@@ -364,7 +370,7 @@ class IDRepoClient:
         if self.enable_inprocess_fallback:
             try:
                 client = self._get_test_client()
-                r = client.get(f"/ida/v1/face-template/uin/{uin}")
+                r = client.get(f"/ida/v1/face-template/uin/{uin}", params=params)
                 if r.status_code == 200:
                     return _templates_from_body(r.json())
             except Exception as e:

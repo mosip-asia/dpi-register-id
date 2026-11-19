@@ -66,17 +66,33 @@ def test_idrepo_client_crud_flow():
     raw = mock_client.get(f"/idrepository/v1/identity/uin/{uin}")
     assert raw.status_code == 200
     raw_identity = raw.json()["response"]["identity"]
+    assert "faceImage" not in raw_identity
     assert "faceEmbedding" not in raw_identity
     assert "faceViews" not in raw_identity
+    assert raw.json()["response"]["documents"] == []
+
+    explicit = mock_client.get(
+        f"/idrepository/v1/identity/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    )
+    assert explicit.json()["response"]["identity"]["faceImage"] == "data:image/jpeg;base64,bW9jay1mYWNl"
+    assert explicit.json()["response"]["documents"]
+
+    withheld = mock_client.get(f"/ida/v1/face-template/uin/{uin}")
+    assert withheld.status_code == 200
+    assert withheld.json()["templates"] == []
+
+    template_res = mock_client.get(
+        f"/ida/v1/face-template/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    )
+    assert template_res.status_code == 200
+    assert set(template_res.json()) == {"templates"}
 
     stored_templates = client.get_face_templates(uin)
     by_sector = {item["sector"]: item["embedding"] for item in stored_templates}
     assert by_sector["front"] == [0.13] * 128
     assert set(by_sector) == {"far-left", "left", "front", "right", "far-right"}
-
-    template_res = mock_client.get(f"/ida/v1/face-template/uin/{uin}")
-    assert template_res.status_code == 200
-    assert set(template_res.json()) == {"templates"}
 
     identities = client.list_identities(limit=10)
     assert any(i["uin"] == uin for i in identities)
@@ -111,11 +127,28 @@ def test_identity_post_does_not_persist_client_vectors():
 
     identity = mock_client.get(f"/idrepository/v1/identity/uin/{uin}")
     body = identity.json()["response"]["identity"]
+    assert "faceImage" not in body
     assert "faceEmbedding" not in body
     assert "faceViews" not in body
-    assert body["faceImage"] == face_image
+    assert identity.json()["response"]["documents"] == []
 
-    templates = mock_client.get(f"/ida/v1/face-template/uin/{uin}")
+    explicit = mock_client.get(
+        f"/idrepository/v1/identity/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    )
+    explicit_body = explicit.json()["response"]["identity"]
+    assert "faceEmbedding" not in explicit_body
+    assert "faceViews" not in explicit_body
+    assert explicit_body["faceImage"] == face_image
+
+    withheld = mock_client.get(f"/ida/v1/face-template/uin/{uin}")
+    assert withheld.status_code == 200
+    assert withheld.json()["templates"] == []
+
+    templates = mock_client.get(
+        f"/ida/v1/face-template/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    )
     assert templates.status_code == 200
     assert templates.json()["templates"] == [{"sector": "front", "embedding": [0.25] * 128}]
 
@@ -133,7 +166,10 @@ def test_identity_post_does_not_persist_client_vectors():
         },
     )
     assert bare.status_code == 200
-    assert mock_client.get("/ida/v1/face-template/uin/5566-7788-9901").status_code == 404
+    assert mock_client.get(
+        "/ida/v1/face-template/uin/5566-7788-9901",
+        params={"includeBiometrics": "true"},
+    ).status_code == 404
 
 
 class _EnrollResponse:

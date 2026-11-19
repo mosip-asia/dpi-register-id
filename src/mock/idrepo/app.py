@@ -248,12 +248,12 @@ def add_identity(payload: dict):
 
 
 @idrepo_app.get("/idrepository/v1/identity/uin/{uin}")
-def get_identity_by_uin(uin: str, includeBiometrics: bool = True):
+def get_identity_by_uin(uin: str, includeBiometrics: bool = False):
     """
     MOSIP IDRepo GetIdentity endpoint.
 
-    includeBiometrics defaults to true so existing callers still receive the
-    stored face. The gateway client asks for false on an ordinary read.
+    Face image and CBEFF stay off the response unless includeBiometrics=true.
+    A caller that can reach this port otherwise receives demographics only.
     """
     record = storage.get_identity(uin)
     if not record:
@@ -372,14 +372,35 @@ def delete_face(uin: str):
 
 
 @idrepo_app.get("/ida/v1/face-template/uin/{uin}")
-def get_face_templates(uin: str):
+def get_face_templates(uin: str, includeBiometrics: bool = False):
     """
     IDA read path for match vectors. Identity demographics are not included.
-    404 when the UIN has no identity row or no stored templates.
+
+    Embeddings stay off the response unless includeBiometrics=true. A UIN with
+    an identity row and no such request returns an empty template list. 404
+    when the UIN has no identity row, or when templates were requested and none
+    are stored.
     """
     record = storage.get_identity(uin)
-    templates = storage.get_face_templates(uin) if record else []
-    if not record or not templates:
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "id": "mosip.ida.face.read",
+                "version": "v1",
+                "errors": [
+                    {
+                        "errorCode": "IDA-FTA-002",
+                        "message": f"Face templates not found for UIN '{uin}'",
+                    }
+                ],
+            },
+        )
+    if not includeBiometrics:
+        return {"templates": []}
+
+    templates = storage.get_face_templates(uin)
+    if not templates:
         raise HTTPException(
             status_code=404,
             detail={

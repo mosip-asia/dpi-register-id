@@ -115,7 +115,10 @@ def test_custodian_read_includes_biometrics_when_requested():
     assert full["face_image"] == FACE
     assert full["cbeff_xml"] == CBEFF
 
-    raw = mock_client.get(f"/idrepository/v1/identity/uin/{uin}")
+    raw = mock_client.get(
+        f"/idrepository/v1/identity/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    )
     assert raw.json()["response"]["identity"]["faceImage"] == FACE
 
 
@@ -164,7 +167,10 @@ def test_update_demographics_login_flag_and_delete_face():
     assert cleared["face_image"] is None
     assert cleared["cbeff_xml"] is None
     assert client.get_face_templates(uin) == []
-    assert mock_client.get(f"/ida/v1/face-template/uin/{uin}").status_code == 404
+    assert mock_client.get(
+        f"/ida/v1/face-template/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    ).status_code == 404
 
     missing = "7788-1200-0099"
     assert client.update_demographics(missing, "Nobody", "nobody@dopa.gov.th") is False
