@@ -179,8 +179,9 @@ def test_callback_sets_httponly_session_and_hides_the_access_token():
     assert morsel["samesite"] == "lax"
 
     stored = json.loads(oidc._STORE.get(f"session:{morsel.value}"))
-    assert stored["access_token"] == ACCESS_TOKEN
-    assert stored["subject"] == "citizen-sub"
+    assert stored == {"subject": "citizen-sub", "uin": "111122223333"}
+    assert ACCESS_TOKEN not in json.dumps(stored)
+    assert "access_token" not in stored
 
     session = client.get("/api/login/session")
     assert session.status_code == 200
@@ -204,6 +205,11 @@ def test_session_omits_uin_when_the_claim_is_absent():
         {"access_token": ACCESS_TOKEN, "id_token": _jwt({"sub": "citizen-sub"}), "expires_in": 90},
     )
     assert captured["response"].status_code == 200
+    cookie = SimpleCookie()
+    cookie.load(captured["response"].headers["set-cookie"])
+    stored = json.loads(oidc._STORE.get(f"session:{cookie[SESSION_COOKIE_NAME].value}"))
+    assert stored == {"subject": "citizen-sub"}
+    assert ACCESS_TOKEN not in json.dumps(stored)
     session = client.get("/api/login/session")
     assert session.status_code == 200
     assert session.json() == {"subject": "citizen-sub"}
@@ -349,8 +355,15 @@ def test_redis_is_used_when_configured_and_memory_is_not(monkeypatch):
     assert oidc._STORE._memory._items == {}
     session_keys = [key for key in fake.store if key.startswith("register-id:oidc:session:")]
     assert len(session_keys) == 1
-    assert ACCESS_TOKEN in fake.store[session_keys[0]]
+    stored = json.loads(fake.store[session_keys[0]])
+    assert stored == {"subject": "citizen-sub", "uin": "9"}
+    assert all(ACCESS_TOKEN not in value for value in fake.store.values())
     _assert_no_secrets(captured["response"], ACCESS_TOKEN, verifier)
+
+    session = client.get("/api/login/session")
+    assert session.status_code == 200
+    assert session.json() == {"subject": "citizen-sub", "uin": "9"}
+    _assert_no_secrets(session, ACCESS_TOKEN)
 
 
 def test_redis_outage_fails_start_without_memory_fallback(monkeypatch):

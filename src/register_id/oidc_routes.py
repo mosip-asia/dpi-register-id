@@ -1,4 +1,4 @@
-"""Citizen Keycloak login routes. Access tokens stay on the server."""
+"""Citizen Keycloak login routes. Responses carry a session id, not a Keycloak access token."""
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse

@@ -4,8 +4,10 @@ Keycloak authorization-code login with PKCE (S256).
 The gateway does not mint an access token and does not put a biometric
 result into a jwtToken field. The browser is sent to the configured realm.
 The callback exchanges the authorization code with the matching PKCE
-verifier and keeps Keycloak's access token on the server, keyed by a
-session id. HTTP responses never include that token.
+verifier and stores a server session keyed by a session id. That record
+holds the subject, an optional uin, and the session TTL. Keycloak's
+access token is read for claims during the exchange and is not written
+to the login store. HTTP responses never include that token.
 
 Pending verifiers and sessions use one small process-local dict when
 REDIS_URL is unset, which is enough for a single process and for tests.
@@ -13,8 +15,8 @@ When REDIS_URL is set, those same keys are stored in Redis so a process
 restart can still finish the code exchange:
 
 - ``register-id:oidc:state:{state}`` — PKCE code_verifier
-- ``register-id:oidc:session:{session_id}`` — server session, including the
-  access token
+- ``register-id:oidc:session:{session_id}`` — server session (subject,
+  optional uin). Expiry is the key TTL.
 
 A configured Redis that cannot be reached fails the call. The in-memory
 dict is not a fallback.
@@ -229,9 +231,11 @@ def begin_authorization() -> str:
 
 def establish_session(code: str, state: str) -> SessionResult:
     """
-    Exchange an authorization code and store the access token under a new session id.
+    Exchange an authorization code and store the signed-in subject under a new session id.
 
-    The returned value has no access token. The token stays in the login store.
+    The access token is required for the exchange and may supply claims.
+    It is not stored and is not returned. The login store keeps subject,
+    optional uin, and the session TTL taken from expires_in.
     """
     if not code or not state:
         raise OidcRequestError("Missing authorization code or state")
@@ -245,7 +249,7 @@ def establish_session(code: str, state: str) -> SessionResult:
     if not isinstance(access_token, str) or not access_token:
         raise OidcExchangeError("Sign-in could not be completed")
 
-    record: dict[str, str] = {"access_token": access_token, "subject": subject}
+    record: dict[str, str] = {"subject": subject}
     if uin is not None:
         record["uin"] = uin
     session_id = secrets.token_urlsafe(32)
@@ -256,7 +260,7 @@ def establish_session(code: str, state: str) -> SessionResult:
 
 
 def load_session(session_id: str | None) -> dict[str, str] | None:
-    """Return the subject and uin for a session id. The access token is omitted."""
+    """Return the subject and optional uin stored for a session id."""
     if not session_id:
         return None
     raw = _STORE.get(f"session:{session_id}")
