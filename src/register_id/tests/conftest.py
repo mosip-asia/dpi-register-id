@@ -12,9 +12,8 @@ def enroll_headers(token: str = TEST_ENROLL_TOKEN) -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def _enroll_caller_and_empty_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give enroll tests a fixed caller and a fresh hourly bucket."""
-    monkeypatch.setenv("REGISTER_ID_ENROLL_TOKEN", TEST_ENROLL_TOKEN)
+def _empty_enroll_bucket() -> None:
+    """Give each test a fresh hourly enrollment window."""
     reset_enroll_limits()
 
 

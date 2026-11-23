@@ -45,6 +45,50 @@ def _sweep_challenge() -> str:
     return body["challengeId"]
 
 
+def test_enroll_returns_502_when_idrepo_write_fails(monkeypatch):
+    class FailingRepo:
+        last_error = "connection refused"
+
+        def add_identity(self, **kwargs: object) -> bool:
+            del kwargs
+            return False
+
+    captured: list[dict] = []
+
+    def capture(event: dict, **kwargs: object) -> dict:
+        del kwargs
+        captured.append(dict(event))
+        return event
+
+    monkeypatch.setattr("register_id.api.get_idrepo_client", lambda: FailingRepo())
+    monkeypatch.setattr("register_id.api.record_event", capture)
+    uin = "9876-5432-5020"
+    res = client.post(
+        "/api/enroll",
+        headers=enroll_headers(),
+        json={
+            "uin": uin,
+            "fullName": "Failed Write",
+            "email": "fail@citizen.asia",
+            "faceImage": _data_url(b"mock-face-bytes-write-fail"),
+            "consent": _consent(),
+        },
+    )
+    assert res.status_code == 502
+    assert "MOSIP IDRepo" in res.json()["detail"]
+    assert "connection refused" in res.json()["detail"]
+    assert "faceImage" not in res.text
+    stored = IDRepoClient(
+        base_url="http://127.0.0.1:9",
+        enable_inprocess_fallback=True,
+    ).get_identity(uin)
+    assert stored is None
+    assert captured
+    assert captured[-1]["kind"] == "enroll"
+    assert captured[-1]["result"] == "failure"
+    assert "idrepo" in captured[-1]["detail"]
+
+
 def test_api_check_liveness_endpoint():
     payload = {
         "blinkCount": 2,
@@ -399,29 +443,15 @@ def _stored(uin: str):
     return IDRepoClient(enable_inprocess_fallback=True).get_identity(uin)
 
 
-def test_enroll_requires_the_enroll_token_and_stores_nothing(monkeypatch):
+def test_enroll_does_not_require_a_shared_token():
     uin = "4290-0000-8001"
     body = _enroll_body(uin)
 
     missing = client.post("/api/enroll", json=body)
-    wrong = client.post("/api/enroll", json=body, headers=enroll_headers("other-enroll-token"))
-    monkeypatch.setenv("REGISTER_ID_ENROLL_TOKEN", "")
-    empty = client.post("/api/enroll", json=body, headers=enroll_headers())
-    monkeypatch.delenv("REGISTER_ID_ENROLL_TOKEN", raising=False)
-    unset = client.post("/api/enroll", json=body, headers=enroll_headers())
-
-    face = body["faceImage"]
-    for response in (missing, wrong, empty, unset):
-        assert response.status_code == 401
-        text = response.text
-        assert TEST_ENROLL_TOKEN not in text
-        assert "other-enroll-token" not in text
-        assert face not in text
-    assert missing.json()["detail"] == "missing enroll token"
-    assert wrong.json()["detail"] == "invalid enroll token"
-    assert empty.json()["detail"] == "invalid enroll token"
-    assert unset.json()["detail"] == "invalid enroll token"
-    assert _stored(uin) is None
+    assert missing.status_code == 200, missing.text
+    assert TEST_ENROLL_TOKEN not in missing.text
+    assert body["faceImage"] not in missing.text
+    assert _stored(uin) is not None
 
 
 def test_enroll_rate_limit_blocks_the_31st_success_and_ignores_validation_failures(monkeypatch):
@@ -441,12 +471,24 @@ def test_enroll_rate_limit_blocks_the_31st_success_and_ignores_validation_failur
         assert _stored(uin) is not None
 
     blocked_uin = "4291-0030-0000"
-    blocked = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body(blocked_uin))
+    blocked = client.post("/api/enroll", json=_enroll_body(blocked_uin))
     assert blocked.status_code == 429
     assert blocked.json()["detail"] == "Enrollment rate limit exceeded."
     assert TEST_ENROLL_TOKEN not in blocked.text
     assert _enroll_body(blocked_uin)["faceImage"] not in blocked.text
     assert _stored(blocked_uin) is None
+
+    other = _enroll_body("4291-0031-0000")
+    other["email"] = "Someone-Else@citizen.asia"
+    allowed = client.post("/api/enroll", json=other)
+    assert allowed.status_code == 200, allowed.text
+    assert _stored("4291-0031-0000") is not None
+
+    same_person = _enroll_body("4291-0032-0000")
+    same_person["email"] = "  Limited@Citizen.asia  "
+    still_blocked = client.post("/api/enroll", json=same_person)
+    assert still_blocked.status_code == 429
+    assert _stored("4291-0032-0000") is None
 
 
 def test_memory_enroll_window_resets_when_the_hour_passes(monkeypatch):
@@ -510,6 +552,7 @@ def test_enroll_limit_uses_redis_and_fails_closed_when_it_is_down(monkeypatch):
     assert value == "1"
     assert fake.expires[key] == ENROLL_LIMIT_WINDOW_SECONDS
     assert TEST_ENROLL_TOKEN not in key
+    assert "limited@citizen.asia" not in key
     assert _enroll_body(uin)["faceImage"] not in key
     assert _stored(uin) is not None
 

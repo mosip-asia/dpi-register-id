@@ -1,8 +1,9 @@
+import os
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
-import os
 
 _BUILD_VERSION: str = os.getenv("BUILD_VERSION", "0.1.0-dev")
 _ENVIRONMENT: str = os.getenv("ENVIRONMENT", "dev")
@@ -40,7 +41,6 @@ async def get_index(request: Request):
     context = {
         "build_version": _BUILD_VERSION,
         "environment": _ENVIRONMENT,
-        "enroll_token": os.environ.get("REGISTER_ID_ENROLL_TOKEN", ""),
     }
     return templates.TemplateResponse(request=request, name="index.html", context=context)
 
@@ -50,7 +50,6 @@ async def get_lab(request: Request):
     context = {
         "build_version": _BUILD_VERSION,
         "environment": _ENVIRONMENT,
-        "enroll_token": os.environ.get("REGISTER_ID_ENROLL_TOKEN", ""),
     }
     return templates.TemplateResponse(request=request, name="index.html", context=context)
 

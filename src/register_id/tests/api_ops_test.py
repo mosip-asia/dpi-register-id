@@ -98,3 +98,45 @@ def test_reader_cannot_delete_a_face(monkeypatch):
         headers={"Authorization": "Bearer reader-token"},
     )
     assert res.status_code == 403
+
+
+def test_empty_operator_token_denies_citizens_and_audit(monkeypatch):
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_TOKEN", "")
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_ROLE", "custodian")
+    uin = "9876-5432-2400"
+    _enroll(uin)
+    headers = {"Authorization": "Bearer anything"}
+    for path in ("/api/citizens", f"/api/citizens/{uin}", "/api/audit"):
+        denied = client.get(path, headers=headers)
+        assert denied.status_code == 401
+        assert "Ops Citizen" not in denied.text
+        assert "ops@citizen.asia" not in denied.text
+        assert "faceImage" not in denied.text
+
+
+def test_reader_cannot_update_demographics(monkeypatch):
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_TOKEN", "reader-token")
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_ROLE", "reader")
+    uin = "9876-5432-2500"
+    _enroll(uin)
+    res = client.post(
+        f"/api/citizens/{uin}/demographics",
+        headers={"Authorization": "Bearer reader-token"},
+        json={"fullName": "Corrected Name", "email": "corrected@citizen.asia"},
+    )
+    assert res.status_code == 403
+    stored = IDRepoClient(enable_inprocess_fallback=True).get_identity(uin)
+    assert stored is not None
+    assert stored["full_name"] == "Ops Citizen"
+    assert stored["email"] == "ops@citizen.asia"
+
+
+def test_anonymous_audit_read_is_rejected(monkeypatch):
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_TOKEN", "reader-token")
+    monkeypatch.setenv("REGISTER_ID_OPERATOR_ROLE", "reader")
+    missing = client.get("/api/audit")
+    assert missing.status_code == 401
+    wrong = client.get("/api/audit", headers={"Authorization": "Bearer wrong-token"})
+    assert wrong.status_code == 401
+    assert "uin" not in missing.json()
+    assert "uin" not in wrong.json()

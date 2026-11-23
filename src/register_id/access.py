@@ -1,9 +1,8 @@
-"""Token checks for operator routes and citizen enrollment.
+"""Token checks for operator routes.
 
 One shared operator token is configured for this stage. REGISTER_ID_OPERATOR_ROLE
-says whether that token acts as a reader or a custodian. Enrollment uses a
-different secret, REGISTER_ID_ENROLL_TOKEN. This module does not open the
-identity database and does not build an HTTP response.
+says whether that token acts as a reader or a custodian. This module does not
+open the identity database and does not build an HTTP response.
 """
 
 import hmac
@@ -67,30 +66,3 @@ def require_role(authorization_header: str | None, allowed: Collection[str]) -> 
             status_code=403,
         )
     return RoleDecision(ok=True, role=configured)
-
-
-@dataclass(frozen=True)
-class EnrollDecision:
-    """Result the enroll route can map onto 401. ``token`` is set only on success."""
-
-    ok: bool
-    token: str | None = None
-    reason: str | None = None
-    status_code: int | None = None
-
-
-def require_enroll_token(authorization_header: str | None) -> EnrollDecision:
-    """
-    Check "Bearer <token>" against REGISTER_ID_ENROLL_TOKEN.
-
-    A missing header, a token that does not match, or an unset or empty
-    env value fails with status_code 401. This does not accept
-    REGISTER_ID_OPERATOR_TOKEN.
-    """
-    expected = os.environ.get("REGISTER_ID_ENROLL_TOKEN") or ""
-    presented = _presented_token(authorization_header)
-    if presented is None:
-        return EnrollDecision(ok=False, reason="missing enroll token", status_code=401)
-    if not expected or not presented or not hmac.compare_digest(presented, expected):
-        return EnrollDecision(ok=False, reason="invalid enroll token", status_code=401)
-    return EnrollDecision(ok=True, token=presented)

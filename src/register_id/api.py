@@ -7,9 +7,9 @@ Exposes endpoints for citizen enrollment, ISO 30107-3 PAD liveness,
 Two enrollment and check paths exist. The image path hashes JPEG bytes and
 never reports a face match. The descriptor path takes face-api-128
 descriptors from the browser with a report bound to a single-use challenge.
-That report is not a server liveness check, so enrollment stores a draft and
-does not keep the descriptors. Authenticate still compares a submitted
-descriptor with templates already stored.
+That report is not a server liveness check, so the record stays a draft and
+the face image and CBEFF are not written. The descriptors are stored so a
+later check can compare a probe with them.
 """
 
 import logging
@@ -18,12 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Header, HTTPException
 from pydantic import ValidationError
-from register_id.access import (
-    CUSTODIAN_ROLES,
-    DEMOGRAPHIC_ROLES,
-    require_enroll_token,
-    require_role,
-)
+from register_id.access import CUSTODIAN_ROLES, DEMOGRAPHIC_ROLES, require_role
 from register_id.enroll_limit import (
     EnrollLimitExceeded,
     EnrollLimitUnavailable,
@@ -168,23 +163,26 @@ _ENROLL_RATE_DETAIL = "Enrollment rate limit exceeded."
 _ENROLL_LIMIT_UNAVAILABLE = "Enrollment limit store is unavailable."
 
 
-def _caller_enroll_token(authorization: str | None) -> str:
-    """Intended caller, then the hourly write cap. Neither path stores an identity."""
-    decision = require_enroll_token(authorization)
-    if not decision.ok or not decision.token:
-        raise HTTPException(status_code=decision.status_code or 401, detail=decision.reason)
+def _enroll_subject(email: str) -> str:
+    """Hourly bucket for this citizen. Callers do not share one bucket."""
+    return email.strip().lower()
+
+
+def _allow_enroll(email: str) -> str:
+    """Check the hourly write cap. A rejection stores nothing."""
+    subject = _enroll_subject(email)
     try:
-        ensure_enroll_allowed(decision.token)
+        ensure_enroll_allowed(subject)
     except EnrollLimitExceeded:
         raise HTTPException(status_code=429, detail=_ENROLL_RATE_DETAIL)
     except EnrollLimitUnavailable as exc:
         raise HTTPException(status_code=503, detail=_ENROLL_LIMIT_UNAVAILABLE) from exc
-    return decision.token
+    return subject
 
 
-def _count_enroll_write(token: str) -> None:
+def _count_enroll_write(subject: str) -> None:
     try:
-        record_enroll_success(token)
+        record_enroll_success(subject)
     except EnrollLimitUnavailable as exc:
         raise HTTPException(status_code=503, detail=_ENROLL_LIMIT_UNAVAILABLE) from exc
 
@@ -344,7 +342,7 @@ def _store_identity(
     cbeff_xml: str,
     templates: list[dict],
     record_status: str,
-    enroll_token: str,
+    enroll_subject: str,
 ) -> None:
     # Draft means demographics only. Face bytes and CBEFF are written only
     # when presentation passed and the status is biometric. Hash templates on
@@ -367,7 +365,7 @@ def _store_identity(
             status_code=502,
             detail=f"MOSIP IDRepo enrollment failed: {error_msg}",
         )
-    _count_enroll_write(enroll_token)
+    _count_enroll_write(enroll_subject)
 
 
 def _consent_note(req: EnrollRequest) -> str:
@@ -384,16 +382,16 @@ def _enroll_with_descriptors(
     req: EnrollRequest,
     idrepo: IDRepoClient,
     cbeff_xml: str,
-    enroll_token: str,
+    enroll_subject: str,
 ) -> dict:
     """
-    Store a draft after the descriptor report passes the non-liveness checks.
+    Store a draft and the face-api templates after the descriptor checks pass.
 
     The challenge check rejects an expired, reused, or out-of-order report
     before any write. That is anti-replay. The browser report is not a server
-    liveness check, so the record stays draft: demographics and the hash
-    duplicate-byte template only. Face-api descriptors, the face image, and
-    CBEFF are not written.
+    liveness check, so the record stays draft and the face image and CBEFF
+    are not written. The face-api descriptors are stored so a later check
+    has a gallery to compare.
     """
     assert req.faceDescriptors is not None and req.liveness is not None
     try:
@@ -417,8 +415,12 @@ def _enroll_with_descriptors(
     # Do not pass the browser report into the biometric gate. There is no
     # server-side presentation check on this path.
     record_status = "biometric" if may_store_biometric_record(False, False) else "draft"
-    templates = [{"sector": "front", "embedding": hash_vector}]
-    _store_identity(idrepo, req, cbeff_xml, templates, record_status, enroll_token)
+    templates = [
+        {"sector": "front", "embedding": descriptor, "engine": FACE_DESCRIPTOR_ENGINE}
+        for descriptor in descriptors
+    ]
+    templates.append({"sector": "front", "embedding": hash_vector, "engine": ENGINE_NAME})
+    _store_identity(idrepo, req, cbeff_xml, templates, record_status, enroll_subject)
     mail = _notify_enrollment(req)
 
     _audit(
@@ -427,7 +429,8 @@ def _enroll_with_descriptors(
         req.uin,
         "success",
         (
-            f"draft stored; browser report is not a server liveness check; "
+            f"draft stored; {len(descriptors)} {FACE_DESCRIPTOR_ENGINE} templates; "
+            f"browser report is not a server liveness check; "
             f"{_consent_note(req)}; {mail.detail}"
         )[:240],
     )
@@ -449,31 +452,28 @@ def _enroll_with_descriptors(
 
 
 @router.post("/enroll")
-def enroll_citizen_endpoint(
-    req: EnrollRequest,
-    authorization: str | None = Header(default=None),
-):
+def enroll_citizen_endpoint(req: EnrollRequest):
     """
     Enrolls a citizen face through the MOSIP IDRepo REST interface.
 
-    Requires Authorization: Bearer REGISTER_ID_ENROLL_TOKEN. A missing header,
-    a token that does not match, or an unset or empty secret is 401 and stores
-    nothing. After that check, at most ENROLL_SUCCESS_LIMIT successful IDRepo
-    writes are accepted per hour for that token. The next one is 429 and stores
-    nothing. Validation failures are not counted.
+    The citizen portal does not send a shared secret. At most
+    ENROLL_SUCCESS_LIMIT successful IDRepo writes are accepted per hour for
+    one email address. A different email has its own count. The next write
+    for an email already at the cap is 429 and stores nothing. Validation
+    failures are not counted.
 
     1. Extracts JPEG image and serializes into ISO 19794-5 / ISO 19785-3 CBEFF XML.
     2. Without faceDescriptors: computes hash templates from the image bytes
        and stores a draft. The face image and CBEFF are not written.
        With faceDescriptors and liveness: checks the challenge (anti-replay),
-       descriptor shape, and same-face consistency, then stores a draft.
-       The browser report is not a server liveness check, so face-api-128
-       descriptors, the face image, and CBEFF are not written.
+       descriptor shape, and same-face consistency, then stores a draft and
+       the face-api-128 descriptors. The browser report is not a server
+       liveness check, so the face image and CBEFF are not written.
     3. Persists demographics on the identity and templates on the IDA table.
 
     Keycloak login is a separate POST /api/credentials call. No password is accepted here.
     """
-    enroll_token = _caller_enroll_token(authorization)
+    enroll_subject = _allow_enroll(req.email)
     idrepo = get_idrepo_client()
 
     try:
@@ -487,7 +487,7 @@ def enroll_citizen_endpoint(
         )
 
     if req.faceDescriptors is not None:
-        return _enroll_with_descriptors(req, idrepo, cbeff_xml, enroll_token)
+        return _enroll_with_descriptors(req, idrepo, cbeff_xml, enroll_subject)
 
     # The hash templates are a duplicate-byte check on a draft. They are not a
     # biometric of record: presentation has not passed and the engine cannot
@@ -495,7 +495,7 @@ def enroll_citizen_endpoint(
     # left out of the IDRepo write.
     record_status = "biometric" if may_store_biometric_record(False, False) else "draft"
     templates = _templates_for_enrollment(req)
-    _store_identity(idrepo, req, cbeff_xml, templates, record_status, enroll_token)
+    _store_identity(idrepo, req, cbeff_xml, templates, record_status, enroll_subject)
     mail = _notify_enrollment(req)
 
     _audit(

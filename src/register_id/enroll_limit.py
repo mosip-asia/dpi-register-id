@@ -1,10 +1,13 @@
 """
 Hourly cap on successful enrollment writes.
 
+The enroll route passes the citizen email. Each email has its own window, so
+one person's enrollments do not use up another person's cap.
+
 ``get_enroll_limiter`` selects the backend from ``REDIS_URL``:
 
 * unset or blank: process memory (one process, gone on restart)
-* set: Redis, one counter key per token
+* set: Redis, one counter key per subject
 
 A configured Redis that cannot be reached raises ``EnrollLimitUnavailable``.
 There is no silent fallback to process memory, and the limit is not skipped.
@@ -23,7 +26,7 @@ from typing import Any, Protocol
 
 from redis.exceptions import RedisError
 
-# Successful IDRepo writes allowed for one token during the window below.
+# Successful IDRepo writes allowed for one subject during the window below.
 ENROLL_SUCCESS_LIMIT = 30
 ENROLL_LIMIT_WINDOW_SECONDS = 60 * 60
 

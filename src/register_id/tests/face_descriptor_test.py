@@ -107,7 +107,7 @@ def _enroll(uin: str, descriptors: list[list[float]], **overrides) -> object:
 
 
 def _seed_gallery(idrepo: IDRepoClient, uin: str, descriptors: list[list[float]]) -> None:
-    """Store face-api rows directly. Descriptor enroll no longer writes them."""
+    """Store face-api rows directly when a test is not checking enroll."""
     assert idrepo.add_identity(
         uin=uin,
         full_name="Descriptor Citizen",
@@ -312,7 +312,7 @@ def test_enroll_requires_descriptors_and_liveness_together(idrepo):
     assert idrepo.get_identity(uin) is None
 
 
-def test_enroll_with_descriptors_stores_draft_without_face_templates(idrepo):
+def test_enroll_with_descriptors_stores_a_draft_and_the_face_templates(idrepo):
     uin = _uin()
     base = _descriptor(20)
     frames = [base, _noisy(base, 21), _noisy(base, 22)]
@@ -340,9 +340,12 @@ def test_enroll_with_descriptors_stores_draft_without_face_templates(idrepo):
     assert not stored.get("cbeff_xml")
     assert portrait not in json.dumps(stored)
     templates = idrepo.get_face_templates(uin)
-    assert templates == [{"sector": "front", "embedding": embed_face_image(portrait)}]
-    assert all(row.get("engine") != FACE_DESCRIPTOR_ENGINE for row in templates)
-    assert all(row["embedding"] not in frames for row in templates)
+    face_rows = [row for row in templates if row.get("engine") == FACE_DESCRIPTOR_ENGINE]
+    hash_rows = [row for row in templates if row.get("engine") == "hash"]
+    assert [row["embedding"] for row in face_rows] == frames
+    assert hash_rows == [
+        {"sector": "front", "embedding": embed_face_image(portrait), "engine": "hash"}
+    ]
 
 
 def test_inconsistent_frames_are_rejected_and_nothing_is_stored(idrepo):
@@ -402,6 +405,19 @@ def test_enroll_without_descriptors_stays_a_hash_draft(idrepo):
 
 
 # Authenticate
+
+
+def test_enrolled_descriptor_matches_on_verify(idrepo):
+    uin = _uin()
+    base = _descriptor(49)
+    enrolled = _enroll(uin, [base, _noisy(base, 50)])
+    assert enrolled.status_code == 200, enrolled.text
+
+    body = _check(uin, _noisy(base, 51)).json()
+    assert body["isFaceMatch"] is True
+    assert body["verified"] is True
+    assert body["compared"] is True
+    assert body["status"] == "SUCCESS"
 
 
 def test_authenticate_same_face_matches_on_the_server(idrepo):

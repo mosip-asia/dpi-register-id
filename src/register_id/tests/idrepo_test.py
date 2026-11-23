@@ -103,6 +103,22 @@ def test_idrepo_client_crud_flow():
     assert missing.status_code == 404
 
 
+def test_add_identity_fails_without_inprocess_fallback_when_remote_is_down():
+    uin = "9000000502"
+    client = IDRepoClient(base_url="http://127.0.0.1:9", enable_inprocess_fallback=False)
+    saved = client.add_identity(
+        uin=uin,
+        full_name="No Fallback",
+        email="nofallback@example.com",
+        face_image="data:image/jpeg;base64,bW9jay1mYWNl",
+    )
+    assert saved is False
+    assert client.last_error
+    assert "127.0.0.1:9" in client.last_error
+    missing = mock_client.get(f"/idrepository/v1/identity/uin/{uin}")
+    assert missing.status_code == 404
+
+
 def test_identity_post_does_not_persist_client_vectors():
     uin = "5566-7788-9900"
     face_image = "data:image/jpeg;base64," + base64.b64encode(b"direct-face").decode("utf-8")

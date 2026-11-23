@@ -184,6 +184,23 @@ def test_forbidden_keys_are_rejected_and_not_stored(key: str) -> None:
     assert list_events(store=store) == []
 
 
+def test_list_events_rejects_corrupt_or_tainted_audit_line() -> None:
+    store = MemoryStore()
+    record_event(_event(), store=store)
+    tainted = _event()
+    tainted["faceImage"] = FACE
+    store.lines.append(json.dumps(tainted))
+    with pytest.raises(ValueError, match="corrupt audit record") as caught:
+        list_events(store=store)
+    assert FACE not in str(caught.value)
+    assert SECRET not in str(caught.value)
+
+    store.lines[-1] = "{not-json"
+    with pytest.raises(ValueError, match="corrupt audit record") as invalid:
+        list_events(store=store)
+    assert FACE not in str(invalid.value)
+
+
 def test_nested_secret_keys_and_binary_payloads_are_rejected() -> None:
     store = MemoryStore()
     nested = _event()

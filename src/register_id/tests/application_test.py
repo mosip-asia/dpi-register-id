@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from project.web import app
 from register_id.application import APPLICATION_TTL_SECONDS, CODE_ALPHABET
 from register_id.application_store import (
+    _GRACE_SECONDS,
     ApplicationStoreError,
     MemoryApplicationStore,
     RedisApplicationStore,
@@ -63,6 +64,41 @@ def _set_store_key(monkeypatch: pytest.MonkeyPatch) -> str:
     key = Fernet.generate_key().decode()
     monkeypatch.setenv("APPLICATION_STORE_KEY", key)
     return key
+
+
+def test_memory_application_store_prunes_expired_drafts_after_grace() -> None:
+    store = MemoryApplicationStore()
+    expired_at = 1_000_000.0
+    assert store.save(
+        {
+            "id": "guid-old",
+            "code": "OLDONE",
+            "fullName": "Old Person",
+            "email": "old@example.com",
+            "dateOfBirth": "1900-01-01",
+            "expiresAt": expired_at,
+        },
+        ttl_seconds=30,
+        now=expired_at - 10,
+    )
+    later = expired_at + _GRACE_SECONDS + 1
+    assert store.save(
+        {
+            "id": "guid-new",
+            "code": "NEWONE",
+            "fullName": "New Person",
+            "email": "new@example.com",
+            "expiresAt": later + 1_000,
+        },
+        ttl_seconds=30,
+        now=later,
+    )
+    assert "guid-old" not in store.records
+    assert "OLDONE" not in store.codes
+    retained = json.dumps(store.records)
+    assert "old@example.com" not in retained
+    assert "1900-01-01" not in retained
+    assert store.records["guid-new"]["email"] == "new@example.com"
 
 
 def test_create_stores_a_draft_and_hides_the_guid(applications: MemoryApplicationStore) -> None:

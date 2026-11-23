@@ -2,6 +2,7 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from register_id.challenge_store import (
+    _GRACE_SECONDS,
     ChallengeStoreError,
     MemoryChallengeStore,
     RedisChallengeStore,
@@ -79,6 +80,18 @@ def test_expired_challenge_is_consumed_and_then_missing() -> None:
     again = store.consume("sweep_b", now=61)
     assert again.ok is False
     assert again.reason == "missing"
+
+
+def test_memory_store_prunes_records_after_grace_window() -> None:
+    store = MemoryChallengeStore()
+    store.issue("old-challenge", {"kind": "sweep"}, 10, now=0)
+    later = 10 + _GRACE_SECONDS + 1
+    store.issue("new-challenge", {"kind": "sweep"}, 10, now=later)
+    assert store.peek("old-challenge") is None
+    burned = store.consume("old-challenge", now=later)
+    assert burned.ok is False
+    assert burned.reason == "missing"
+    assert store.peek("new-challenge") is not None
 
 
 def test_missing_id_fails() -> None:

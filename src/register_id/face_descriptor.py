@@ -33,7 +33,7 @@ DESCRIPTOR_CONSISTENCY_LIMIT = 0.6
 MIN_BLINKS = 0
 MIN_YAW_SPAN = 0.5
 
-FACE_CHALLENGE_TTL_SECONDS = {"enroll": 600, "check": 120}
+FACE_CHALLENGE_TTL_SECONDS = {"enroll": 300, "check": 120}
 
 Purpose = Literal["enroll", "check"]
 
