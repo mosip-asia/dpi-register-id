@@ -24,6 +24,9 @@ export function Verified() {
         <Link to="/id" className="primary">
           My ID
         </Link>
+        <Link to="/id/activity" className="secondary">
+          My activity
+        </Link>
       </div>
     </Frame>
   );

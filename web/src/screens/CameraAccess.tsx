@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { reportAttempt } from "../api";
 import { Frame } from "../ui";
 import { ApplicationSaveNotice, useSaveApplication } from "./saveApplication";
 
@@ -35,7 +36,10 @@ export function CameraAccess() {
           className="secondary"
           disabled={pending}
           aria-busy={pending}
-          onClick={() => void saveApplication("no-camera")}
+          onClick={() => {
+            reportAttempt({ kind: "camera", reasonCode: "camera_unavailable", detail: "no camera" });
+            void saveApplication("no-camera");
+          }}
         >
           I don't have a camera
         </button>

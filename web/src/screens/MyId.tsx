@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { activityToken } from "../api";
 import { IdCard } from "../IdCard";
 import { useFlow } from "../flow";
 import { CopyValue, Frame } from "../ui";
@@ -40,6 +41,11 @@ export function MyId() {
         <Link to="/enroll/details" className="secondary">
           Update details
         </Link>
+        {activityToken() ? (
+          <Link to="/id/activity" className="secondary">
+            My activity
+          </Link>
+        ) : null}
         <button
           type="button"
           className="quiet"

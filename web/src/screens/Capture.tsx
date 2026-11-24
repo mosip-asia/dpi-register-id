@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { CircleHelp } from "lucide-react";
-import { getFaceChallenge, type FaceChallenge } from "../api";
+import { getFaceChallenge, reportAttempt, type FaceChallenge } from "../api";
 import type { ScanResult } from "../face/useFaceScan";
 import { useFlow } from "../flow";
 import { Frame } from "../ui";
@@ -16,6 +16,7 @@ export function Capture() {
   const [challenge, setChallenge] = useState<FaceChallenge | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  const reportedChallenge = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -26,7 +27,11 @@ export function Capture() {
         if (active) setChallenge(next);
       })
       .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : "The face check could not start.");
+        if (!active) return;
+        setError(caught instanceof Error ? caught.message : "The face check could not start.");
+        if (reportedChallenge.current === round) return;
+        reportedChallenge.current = round;
+        reportAttempt({ kind: "enroll", reasonCode: "enroll_failed", detail: "challenge" });
       });
     return () => {
       active = false;

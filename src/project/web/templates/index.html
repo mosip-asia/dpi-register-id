@@ -148,8 +148,8 @@
           <span>👤</span> Citizen Identity Enrollment
         </h5>
         <div class="mb-3">
-          <label class="form-label small text-muted font-monospace mb-1">Generated MOSIP UIN</label>
-          <input id="in-uin" type="text" readonly class="form-control font-monospace fw-bold text-primary bg-light">
+          <label class="form-label small text-muted font-monospace mb-1">MOSIP UIN</label>
+          <input id="in-uin" type="text" readonly placeholder="Assigned by the server" class="form-control font-monospace fw-bold text-primary bg-light">
         </div>
         <div class="mb-3">
           <label class="form-label small text-muted font-monospace mb-1">Full Legal Name</label>
@@ -563,25 +563,6 @@
     }
   }
 
-  async function initUIN() {
-    try {
-      const res = await fetch('/api/idgenerator/uin');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.uin) {
-          document.getElementById('in-uin').value = data.uin;
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn('IDGenerator fetch failed, using local format', e);
-    }
-    const p1 = Math.floor(1000 + Math.random() * 9000);
-    const p2 = Math.floor(1000 + Math.random() * 9000);
-    const p3 = Math.floor(1000 + Math.random() * 9000);
-    document.getElementById('in-uin').value = `${p1}-${p2}-${p3}`;
-  }
-
   async function fetchLivenessChallenge() {
     try {
       const res = await fetch('/api/sweep/challenge', { method: 'POST' });
@@ -603,8 +584,6 @@
       pushDiagEvent('Sweep challenge fetch failed');
     }
   }
-
-  initUIN();
 
   async function loadModels() {
     if (modelsLoaded) return;
@@ -1210,7 +1189,6 @@
       alert('Finish the head sweep before enrolling.');
       return;
     }
-    const uin = document.getElementById('in-uin').value;
     const name = document.getElementById('in-name').value || 'Akraradet';
     const email = document.getElementById('in-email').value || 'citizen@ait.asia';
 
@@ -1225,10 +1203,15 @@
     resDiv.innerHTML = '<span>Saving citizen record and serializing ISO 19794-5 CBEFF XML...</span>';
 
     const enrollPayload = {
-      uin: uin,
       fullName: name,
       email: email,
-      faceImage: faceImage || ''
+      faceImage: faceImage || '',
+      consent: {
+        accepted: true,
+        purpose: 'Lab face enrollment',
+        acceptedAt: Date.now() / 1000,
+        language: 'eng'
+      }
     };
     if (faceViews) enrollPayload.faceViews = faceViews;
 
@@ -1241,7 +1224,9 @@
       const data = await res.json();
 
       if (res.ok && data.status === 'SUCCESS') {
+        const uin = data.uin || '';
         enrolledCredentialUin = uin;
+        document.getElementById('in-uin').value = uin;
         diag.match.status = 'enrolled';
         diag.match.message = `Templates stored for ${uin}` + (faceViews ? ` (${faceViews.length} views)` : ' (front only)');
         pushDiagEvent(`Enroll OK ${uin}`);
@@ -1261,7 +1246,6 @@
             <div id="login-status" class="mt-2"></div>
           </div>
         `;
-        initUIN();
       } else {
         resDiv.className = 'alert alert-danger small mt-2';
         resDiv.innerHTML = `<div>❌ Enrollment Error: ${data.detail || data.message || 'Unknown error'}</div>`;

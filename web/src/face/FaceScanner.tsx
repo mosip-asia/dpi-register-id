@@ -1,5 +1,6 @@
-import { useRef, type CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { Check } from "lucide-react";
+import { reportAttempt } from "../api";
 import { SECTORS, SECTOR_LABELS } from "./liveness";
 import { useFaceScan, type ScanError, type ScanMode, type ScanPhase, type ScanResult } from "./useFaceScan";
 
@@ -43,7 +44,20 @@ const SWEEP_PHASES: ReadonlySet<ScanPhase> = new Set(["sweep", "frontal", "captu
 export function FaceScanner({ mode, challengeId, requiredBlinks, onDone }: FaceScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const reportedCamera = useRef<ScanError | null>(null);
   const scan = useFaceScan({ mode, challengeId, requiredBlinks, onDone, videoRef, canvasRef });
+
+  useEffect(() => {
+    if (mode !== "enroll") return;
+    if (!scan.error) {
+      reportedCamera.current = null;
+      return;
+    }
+    if (scan.error === "models") return;
+    if (reportedCamera.current === scan.error) return;
+    reportedCamera.current = scan.error;
+    reportAttempt({ kind: "camera", reasonCode: "camera_unavailable", detail: scan.error });
+  }, [mode, scan.error]);
 
   const live = scan.phase !== "loading" && scan.phase !== "camera" && scan.phase !== "error";
   const veil = scan.phase === "error" ? "" : live && scan.phase !== "done" ? null : INSTRUCTIONS[scan.phase];

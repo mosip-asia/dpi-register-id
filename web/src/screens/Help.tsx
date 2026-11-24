@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { reportAttempt } from "../api";
 import { useFlow } from "../flow";
 import { Frame } from "../ui";
 import { ApplicationSaveNotice, useSaveApplication } from "./saveApplication";
@@ -53,7 +54,10 @@ export function Help() {
           className="secondary"
           disabled={pending}
           aria-busy={pending}
-          onClick={() => void saveApplication("camera-quality")}
+          onClick={() => {
+            reportAttempt({ kind: "camera", reasonCode: "camera_quality", detail: "camera quality" });
+            void saveApplication("camera-quality");
+          }}
         >
           The camera is not good enough
         </button>

@@ -8,9 +8,11 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useFlow } from "./flow";
+import { Activity } from "./screens/Activity";
 import { CameraAccess } from "./screens/CameraAccess";
 import { Capture } from "./screens/Capture";
 import { Consent } from "./screens/Consent";
+import { Desk } from "./screens/Desk";
 import { Details } from "./screens/Details";
 import { FaceCheck } from "./screens/FaceCheck";
 import { FixDetail } from "./screens/FixDetail";
@@ -94,6 +96,8 @@ const routeTree = rootRoute.addChildren([
   route("/prove/verified", Verified),
   route("/prove/unmatched", Unmatched),
   route("/id", MyId),
+  route("/id/activity", Activity),
+  route("/desk", Desk),
 ]);
 
 const router = createRouter({ routeTree });

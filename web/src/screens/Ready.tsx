@@ -1,8 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { useState } from "react";
-import { ApiError, enrollCitizen, FACE_ENGINE, issueUin } from "../api";
-import { drawIdCard } from "../drawIdCard";
+import { ApiError, enrollCitizen, FACE_ENGINE, reportAttempt, saveActivityToken } from "../api";
 import { IdCard } from "../IdCard";
 import { useFlow } from "../flow";
 import { CopyValue, Frame } from "../ui";
@@ -28,32 +27,25 @@ export function Ready() {
     : "Create your ID";
 
   async function createId() {
-    if (!flow.photoDataUrl || !flow.scan || !flow.fullName.trim() || !flow.email.trim()) {
-      setError("Go back and scan your face again. A name, an email, and a scan are required.");
+    if (
+      !flow.photoDataUrl ||
+      !flow.scan ||
+      !flow.fullName.trim() ||
+      !flow.email.trim() ||
+      !flow.gender.trim() ||
+      !flow.dateOfBirth.trim()
+    ) {
+      setError("Go back and scan your face again. A name, a gender, a date of birth, an email, and a scan are required.");
       return;
     }
     setPending(true);
     setError(null);
     try {
-      // A number typed earlier on the prove screen is not an issued registration number.
-      const uin = await issueUin();
-      let idCardImage: string | undefined;
-      if (emailIdCard) {
-        try {
-          const drawn = await drawIdCard({
-            uin,
-            fullName: flow.fullName,
-            dateOfBirth: flow.dateOfBirth,
-          });
-          if (drawn) idCardImage = drawn;
-        } catch {
-          idCardImage = undefined;
-        }
-      }
       const result = await enrollCitizen({
-        uin,
         fullName: flow.fullName,
         email: flow.email,
+        gender: flow.gender,
+        dateOfBirth: flow.dateOfBirth,
         faceImage: flow.photoDataUrl,
         faceDescriptors: flow.scan.descriptors,
         liveness: {
@@ -63,8 +55,8 @@ export function Ready() {
           sweepYaws: flow.scan.sweepYaws,
         },
         emailIdCard,
-        idCardImage,
       });
+      saveActivityToken(result.activityToken);
       flow.update({
         uin: result.uin,
         enrolled: true,
@@ -75,6 +67,7 @@ export function Ready() {
         scan: null,
       });
     } catch (caught) {
+      reportAttempt({ kind: "enroll", reasonCode: "enroll_failed", detail: "enrol" });
       setError(caught instanceof ApiError ? caught.message : caught instanceof Error ? caught.message : "Enrollment failed.");
     } finally {
       setPending(false);

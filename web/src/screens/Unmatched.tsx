@@ -29,6 +29,9 @@ export function Unmatched() {
         <Link to="/enroll/help" className="secondary">
           Get help
         </Link>
+        <Link to="/id/activity" className="secondary">
+          My activity
+        </Link>
       </div>
     </Frame>
   );

@@ -28,6 +28,7 @@ export function Frame({
   title,
   lede,
   aside,
+  wide = false,
   children,
 }: {
   stepIndex?: number;
@@ -36,6 +37,7 @@ export function Frame({
   title: string;
   lede?: string;
   aside?: ReactNode;
+  wide?: boolean;
   children?: ReactNode;
 }) {
   const reduce = useReducedMotion();
@@ -47,8 +49,12 @@ export function Frame({
       ? `Step ${stepIndex} of ${stepCount}${kicker ? `, ${kicker}` : ""}`
       : kicker;
 
+  const frameClass = ["frame", steps.length === 0 ? "is-plain" : "", wide ? "is-wide" : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className={steps.length === 0 ? "frame is-plain" : "frame"}>
+    <div className={frameClass}>
       {steps.length > 0 ? (
         <nav className="rail" aria-label="Progress">
           <ol>
@@ -134,14 +140,19 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="lockup">
           <strong className="institute">Asian Institute of Technology</strong>
           <span className="lockup-rule" aria-hidden="true" />
-          <Link to="/" className="brand">
-            <strong>register-id</strong>
-            <span>Citizen Registration Gateway</span>
-          </Link>
+          <div className="brand-block">
+            <Link to="/" className="brand">
+              register-id
+            </Link>
+            <span className="brand-note">Citizen Registration Gateway</span>
+          </div>
         </div>
-        <span className="lang" lang="en">
-          EN
-        </span>
+        <nav className="app-nav" aria-label="Portal">
+          <Link to="/enroll/consent">Enroll</Link>
+          <Link to="/prove">Prove</Link>
+          <Link to="/id">My ID</Link>
+          <Link to="/desk">Desk</Link>
+        </nav>
       </header>
       {children}
     </>

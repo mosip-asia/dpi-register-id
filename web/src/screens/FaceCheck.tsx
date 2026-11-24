@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ApiError, getFaceChallenge, meanDescriptor, verifyFace, type FaceChallenge } from "../api";
+import { ApiError, getFaceChallenge, meanDescriptor, saveActivityToken, verifyFace, type FaceChallenge } from "../api";
 import type { ScanResult } from "../face/useFaceScan";
 import { useFlow } from "../flow";
 import { Frame } from "../ui";
@@ -49,6 +49,7 @@ export function FaceCheck() {
           sweepYaws: result.sweepYaws,
         },
       });
+      saveActivityToken(verdict.activityToken);
       if (verdict.isFaceMatch) {
         update({
           verified: true,

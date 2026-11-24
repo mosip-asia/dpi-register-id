@@ -8,11 +8,20 @@ importers:
 
   .:
     dependencies:
+      '@fontsource/fraunces':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/ibm-plex-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource/lato':
         specifier: ^5.2.6
         version: 5.3.0
       '@fontsource/metropolis':
         specifier: ^5.2.8
+        version: 5.3.0
+      '@fontsource/outfit':
+        specifier: ^5.3.0
         version: 5.3.0
       '@tanstack/react-router':
         specifier: ^1.139.3
@@ -299,11 +308,20 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@fontsource/fraunces@5.3.0':
+    resolution: {integrity: sha512-LEHTOBiZufQzAvnAe2rZ8ZknbDS28Q9kzwb0L+gZJEmjLGr8hhZ/5NuHXwDuHBWhVXYoiGGXmrb0H6Ko/RrHTg==}
+
+  '@fontsource/ibm-plex-mono@5.3.0':
+    resolution: {integrity: sha512-eTgnZjZEGk1QtD3ZstF+Vclo2HLAni8YMy34/DxllwZvyz1lR/1RF/xTiAquOBO7MvqBx8D2Ig2WCPMVfdZu7Q==}
+
   '@fontsource/lato@5.3.0':
     resolution: {integrity: sha512-0WhF/4rhrw+ErIyneKvhHn2YAl+xf8GDtllgOgOzDmeaSlLQtjpChXaQOpWhG2BchQW0WJy2zLV12Hdg0ndOMw==}
 
   '@fontsource/metropolis@5.3.0':
     resolution: {integrity: sha512-s1KD3SoZdxBgzIKRYGDeIUToIkIHCuIP/t5NUIKh0z1LHU3VqrdLCGxQpNTndI4WuqD1ID+03VfzaTXcDC3MFg==}
+
+  '@fontsource/outfit@5.3.0':
+    resolution: {integrity: sha512-0AVHzTTVJSxWDOxPKSfMeHhZeBFDU3cmgrcOb76ZEyhGo0+xgyG3GsLF3h9+X8w0IX7G4jzjJgFQEBiWdX6VgA==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1085,9 +1103,15 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
+  '@fontsource/fraunces@5.3.0': {}
+
+  '@fontsource/ibm-plex-mono@5.3.0': {}
+
   '@fontsource/lato@5.3.0': {}
 
   '@fontsource/metropolis@5.3.0': {}
+
+  '@fontsource/outfit@5.3.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
