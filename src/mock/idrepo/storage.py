@@ -4,8 +4,8 @@ Storage backend for Mock MOSIP IDRepo.
 Connects to PostgreSQL (mosip_idrepo schema) when available,
 with automatic SQLite fallback for offline environments.
 
-Identity rows store demographics, record status, the login-disabled flag,
-the face image, and CBEFF only. Match vectors live in face_template
+Identity rows store the posted identity fields, record status, the
+login-disabled flag, the face image, and CBEFF. Match vectors live in face_template
 (mosip_ida on PostgreSQL). The gateway reaches this store through HTTP.
 
 A template row carries sector, embedding, an optional engine name, and a slot
@@ -48,10 +48,43 @@ def _embedding_text(embedding: Any) -> str:
     return json.dumps(embedding)
 
 
+def _identity_fields_from_stored(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if not isinstance(raw, str) or not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+def _dump_identity_fields(fields: dict[str, Any] | None) -> str | None:
+    if fields is None:
+        return None
+    return json.dumps(fields, ensure_ascii=False)
+
+
+def _patched_identity_json(raw: Any, full_name: str, email: str | None) -> str:
+    """Keep posted identity fields. A name or email correction replaces those two."""
+    doc = _identity_fields_from_stored(raw)
+    existing = doc.get("fullName")
+    if isinstance(existing, list) and existing and isinstance(existing[0], dict):
+        updated = [dict(item) for item in existing]
+        updated[0]["value"] = full_name
+        doc["fullName"] = updated
+    else:
+        doc["fullName"] = [{"language": "eng", "value": full_name}]
+    doc["email"] = email
+    return json.dumps(doc, ensure_ascii=False)
+
+
 def _normalize_identity(row: dict[str, Any]) -> dict[str, Any]:
     record = dict(row)
     record["status"] = record.get("status") or "draft"
     record["login_disabled"] = bool(record.get("login_disabled"))
+    record["identity_fields"] = _identity_fields_from_stored(record.get("identity_json"))
     return record
 
 
@@ -113,6 +146,7 @@ class IDRepoStorage:
                         cbeff_xml TEXT,
                         status TEXT NOT NULL DEFAULT 'draft',
                         login_disabled INTEGER NOT NULL DEFAULT 0,
+                        identity_json TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
@@ -180,6 +214,7 @@ class IDRepoStorage:
                             cbeff_xml TEXT,
                             status VARCHAR(16) NOT NULL DEFAULT 'draft',
                             login_disabled BOOLEAN NOT NULL DEFAULT FALSE,
+                            identity_json TEXT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );
                     """)
@@ -190,6 +225,10 @@ class IDRepoStorage:
                     cur.execute("""
                         ALTER TABLE mosip_idrepo.citizen_identity
                         ADD COLUMN IF NOT EXISTS login_disabled BOOLEAN NOT NULL DEFAULT FALSE;
+                    """)
+                    cur.execute("""
+                        ALTER TABLE mosip_idrepo.citizen_identity
+                        ADD COLUMN IF NOT EXISTS identity_json TEXT;
                     """)
                     cur.execute("CREATE SCHEMA IF NOT EXISTS mosip_ida;")
                     cur.execute("""
@@ -228,6 +267,8 @@ class IDRepoStorage:
                 "ALTER TABLE citizen_identity "
                 "ADD COLUMN login_disabled INTEGER NOT NULL DEFAULT 0"
             )
+        if "identity_json" not in present:
+            conn.execute("ALTER TABLE citizen_identity ADD COLUMN identity_json TEXT")
 
     def _clear_legacy_pg(self, cur, uin: str) -> None:
         """Null leftover template columns on databases created before the split."""
@@ -267,11 +308,14 @@ class IDRepoStorage:
         face_image: str | None,
         cbeff_xml: str | None,
         status: str = "draft",
+        identity_fields: dict[str, Any] | None = None,
     ) -> bool:
         # Callers that omit status stay draft. A face on the row is not a match.
         if status not in _RECORD_STATUSES:
             logger.error(f"Refusing identity save with status '{status}'")
             return False
+
+        identity_json = _dump_identity_fields(identity_fields)
 
         if self.active_backend == "postgres":
             conn = self._get_pg_connection()
@@ -280,15 +324,17 @@ class IDRepoStorage:
                     with conn.cursor() as cur:
                         cur.execute("""
                             INSERT INTO mosip_idrepo.citizen_identity
-                                (uin, full_name, email, face_image, cbeff_xml, status)
-                            VALUES (%s, %s, %s, %s, %s, %s)
+                                (uin, full_name, email, face_image, cbeff_xml, status,
+                                 identity_json)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (uin) DO UPDATE
                             SET full_name = EXCLUDED.full_name,
                                 email = EXCLUDED.email,
                                 face_image = EXCLUDED.face_image,
                                 cbeff_xml = EXCLUDED.cbeff_xml,
-                                status = EXCLUDED.status;
-                        """, (uin, full_name, email, face_image, cbeff_xml, status))
+                                status = EXCLUDED.status,
+                                identity_json = EXCLUDED.identity_json;
+                        """, (uin, full_name, email, face_image, cbeff_xml, status, identity_json))
                         self._clear_legacy_pg(cur, uin)
                     conn.commit()
                     return True
@@ -303,15 +349,16 @@ class IDRepoStorage:
             with conn:
                 conn.execute("""
                     INSERT INTO citizen_identity
-                        (uin, full_name, email, face_image, cbeff_xml, status)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (uin, full_name, email, face_image, cbeff_xml, status, identity_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (uin) DO UPDATE
                     SET full_name = excluded.full_name,
                         email = excluded.email,
                         face_image = excluded.face_image,
                         cbeff_xml = excluded.cbeff_xml,
-                        status = excluded.status;
-                """, (uin, full_name, email, face_image, cbeff_xml, status))
+                        status = excluded.status,
+                        identity_json = excluded.identity_json;
+                """, (uin, full_name, email, face_image, cbeff_xml, status, identity_json))
                 self._clear_legacy_sqlite(conn, uin)
             return True
         except Exception as e:
@@ -328,24 +375,28 @@ class IDRepoStorage:
         return row is not None
 
     def update_demographics(self, uin: str, full_name: str, email: str | None) -> bool:
-        """Correct name and email. Face bytes, templates, status, and login flag stay."""
+        """Correct name and email. Other posted fields, face bytes, and templates stay."""
         if self.active_backend == "postgres":
             conn = self._get_pg_connection()
             if conn:
                 try:
                     with conn.cursor() as cur:
-                        cur.execute("""
-                            UPDATE mosip_idrepo.citizen_identity
-                            SET full_name = %s, email = %s
-                            WHERE uin = %s;
-                        """, (full_name, email, uin))
                         cur.execute(
-                            "SELECT 1 FROM mosip_idrepo.citizen_identity WHERE uin = %s;",
+                            "SELECT identity_json FROM mosip_idrepo.citizen_identity WHERE uin = %s;",
                             (uin,),
                         )
-                        updated = cur.fetchone() is not None
+                        row = cur.fetchone()
+                        if row is None:
+                            conn.rollback()
+                            return False
+                        identity_json = _patched_identity_json(row[0], full_name, email)
+                        cur.execute("""
+                            UPDATE mosip_idrepo.citizen_identity
+                            SET full_name = %s, email = %s, identity_json = %s
+                            WHERE uin = %s;
+                        """, (full_name, email, identity_json, uin))
                     conn.commit()
-                    return updated
+                    return True
                 except Exception as e:
                     logger.error(f"PostgreSQL demographic update failed: {e}")
                     conn.rollback()
@@ -355,12 +406,19 @@ class IDRepoStorage:
         conn = self._get_sqlite_connection()
         try:
             with conn:
+                row = conn.execute(
+                    "SELECT identity_json FROM citizen_identity WHERE uin = ?",
+                    (uin,),
+                ).fetchone()
+                if row is None:
+                    return False
+                identity_json = _patched_identity_json(row[0], full_name, email)
                 conn.execute("""
                     UPDATE citizen_identity
-                    SET full_name = ?, email = ?
+                    SET full_name = ?, email = ?, identity_json = ?
                     WHERE uin = ?;
-                """, (full_name, email, uin))
-                return self._sqlite_has_uin(conn, uin)
+                """, (full_name, email, identity_json, uin))
+                return True
         except Exception as e:
             logger.error(f"SQLite demographic update failed: {e}")
             return False
@@ -557,7 +615,7 @@ class IDRepoStorage:
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute("""
                             SELECT uin, full_name, email, face_image, cbeff_xml,
-                                   status, login_disabled, created_at
+                                   status, login_disabled, identity_json, created_at
                             FROM mosip_idrepo.citizen_identity WHERE uin = %s;
                         """, (uin,))
                         row = cur.fetchone()
@@ -572,7 +630,7 @@ class IDRepoStorage:
             cur = conn.cursor()
             cur.execute("""
                 SELECT uin, full_name, email, face_image, cbeff_xml,
-                       status, login_disabled, created_at
+                       status, login_disabled, identity_json, created_at
                 FROM citizen_identity WHERE uin = ?;
             """, (uin,))
             row = cur.fetchone()

@@ -2,8 +2,10 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+
+from register_id.idrepo_client import inprocess_fallback_enabled
 
 _BUILD_VERSION: str = os.getenv("BUILD_VERSION", "0.1.0-dev")
 _ENVIRONMENT: str = os.getenv("ENVIRONMENT", "dev")
@@ -14,7 +16,7 @@ router = APIRouter()
 template_path = Path(__file__).parent.joinpath("templates")
 templates = Jinja2Templates(directory=template_path)
 _DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
-_SPA_PREFIXES = ("enroll", "prove", "id", "assets", "models")
+_SPA_PREFIXES = ("enroll", "prove", "id", "desk", "assets", "models")
 
 
 def _spa_index() -> HTMLResponse | None:
@@ -26,11 +28,70 @@ def _spa_index() -> HTMLResponse | None:
 
 @router.get("/health")
 async def get_health():
+    """Liveness: the process is serving. Dependency checks are not done here."""
     return {
         "status": "ok",
         "environment": _ENVIRONMENT,
         "build_version": _BUILD_VERSION,
     }
+
+
+def _config_ready() -> bool:
+    """Kit mode needs Redis plus the MOSIP and Keycloak settings. It does not call IDRepo."""
+    required = (
+        "REDIS_URL",
+        "MOSIP_IDREPO_BASE_URL",
+        "MOSIP_AUTHMANAGER_URL",
+        "MOSIP_CLIENT_ID",
+        "MOSIP_SECRET_KEY",
+        "KEYCLOAK_ADMIN_CLIENT_ID",
+        "KEYCLOAK_ADMIN_CLIENT_SECRET",
+    )
+    if any(not os.getenv(name, "").strip() for name in required):
+        return False
+    # Kit deploys use two hosts. KEYCLOAK_URL does not stand in for either.
+    public = os.getenv("KEYCLOAK_PUBLIC_URL", "").strip()
+    internal = os.getenv("KEYCLOAK_INTERNAL_URL", "").strip()
+    return bool(public and internal)
+
+
+@router.get("/ready")
+async def get_ready():
+    """Readiness: Redis and loaded configuration. IDRepo is not probed."""
+    checks: dict[str, str] = {}
+    ready = True
+
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if not redis_url:
+        checks["redis"] = "skipped" if inprocess_fallback_enabled() else "missing"
+        if not inprocess_fallback_enabled():
+            ready = False
+    else:
+        try:
+            import redis
+
+            client = redis.Redis.from_url(
+                redis_url,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
+            client.ping()
+            checks["redis"] = "ok"
+        except Exception:
+            checks["redis"] = "down"
+            ready = False
+
+    if inprocess_fallback_enabled():
+        checks["config"] = "skipped"
+    else:
+        checks["config"] = "ok" if _config_ready() else "incomplete"
+        if checks["config"] != "ok":
+            ready = False
+
+    body = {"status": "ok" if ready else "unavailable", "checks": checks}
+    if not ready:
+        return JSONResponse(status_code=503, content=body)
+    return body
 
 
 @router.get("/", response_class=HTMLResponse)

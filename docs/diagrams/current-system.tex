@@ -109,7 +109,8 @@
 
 \node[hash, text width=10.6cm, right=1.8cm of ew1] (sserver) {%
   {\hk No neural model on the server}\\[4pt]
-  {\gk 1.} Build ISO 19794-5 / CBEFF XML from the JPEG bytes.\\[3pt]
+  {\gk 1.} Hash-only enrol stays draft and does not build CBEFF.\\
+  CBEFF is sent only when face-api passes the biometric policy.\\[3pt]
   {\gk 2.} \texttt{embed\_face\_image}: SHA-256 of those bytes,\\
   mapped to a 128-D unit vector. Same JPEG, same vector.\\[3pt]
   A client-supplied vector is rejected.\\
@@ -119,7 +120,7 @@
   {\gk IDRepo REST write}\\[6pt]
   identity row\\
   uin, name, email\\
-  JPEG, CBEFF XML\\[5pt]
+  hash draft, no CBEFF\\[5pt]
   template rows\\
   uin, sector\\
   128-D embedding\\[6pt]
@@ -130,7 +131,7 @@
   {\gk mosip\_idrepo.citizen\_identity}\\[3pt]
   uin, full\_name, email,\\
   face\_image (JPEG text),\\
-  cbeff\_xml\\[8pt]
+  cbeff\_xml only after a face-api policy pass\\[8pt]
   {\gk mosip\_ida.face\_template}\\[3pt]
   uin + sector,\\
   embedding (JSON text)\\[8pt]

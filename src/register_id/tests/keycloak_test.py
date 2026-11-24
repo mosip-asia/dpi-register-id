@@ -46,6 +46,8 @@ def make_client(**overrides: str) -> keycloak.KeycloakBridgeClient:
         "admin_user": "kc-admin",
         "admin_pass": ADMIN_PASSWORD,
         "realm": "mosip",
+        "client_id": "register-id",
+        "client_secret": "service-secret",
     }
     settings.update(overrides)
     return keycloak.KeycloakBridgeClient(**settings)
@@ -56,7 +58,7 @@ def user_record(
     *,
     include_attributes: bool = True,
     user_id: str = "user-1",
-    username: str = "ada",
+    username: str = UIN,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {"id": user_id, "username": username}
     if include_attributes:
@@ -115,12 +117,14 @@ def test_create_sends_password_only_as_credential_and_omits_biometrics(monkeypat
     assert bool(result) is True
 
     token_call = calls[0][1]
-    assert token_call["data"]["password"] == ADMIN_PASSWORD
+    assert token_call["data"]["grant_type"] == "client_credentials"
+    assert token_call["data"]["client_secret"] == "service-secret"
+    assert "password" not in token_call["data"]
     assert CITIZEN_PASSWORD not in str(token_call["data"])
 
     create_call = calls[1][1]
     payload = create_call["json"]
-    assert payload["username"] == "ada"
+    assert payload["username"] == UIN
     assert payload["firstName"] == "Ada"
     assert payload["lastName"] == "Lovelace"
     assert payload["attributes"] == {"uin": [UIN]}
@@ -156,12 +160,14 @@ def test_network_error_on_create_fails(monkeypatch):
     assert result.detail == "network error"
 
 
-def test_missing_admin_password_does_not_call_keycloak(monkeypatch):
+def test_missing_client_secret_does_not_call_keycloak(monkeypatch):
     def post(*args, **kwargs):
-        raise AssertionError("token request must not run without an admin password")
+        raise AssertionError("token request must not run without a client secret")
 
     monkeypatch.setattr(keycloak.requests, "post", post)
-    result = make_client(admin_pass="").provision_citizen(UIN, FULL_NAME, EMAIL, CITIZEN_PASSWORD)
+    result = make_client(client_id="", client_secret="").provision_citizen(
+        UIN, FULL_NAME, EMAIL, CITIZEN_PASSWORD
+    )
     assert result.ok is False
     assert result.created is False
     assert result.detail == "admin token unavailable"
@@ -169,13 +175,14 @@ def test_missing_admin_password_does_not_call_keycloak(monkeypatch):
 
 
 def test_admin_password_default_is_not_hardcoded(monkeypatch):
-    monkeypatch.delenv("KEYCLOAK_ADMIN_PASSWORD", raising=False)
+    monkeypatch.setenv("KEYCLOAK_ADMIN_USER", "admin")
+    monkeypatch.setenv("KEYCLOAK_ADMIN_PASSWORD", "admin")
     reloaded = importlib.reload(keycloak)
-    assert reloaded.KEYCLOAK_ADMIN_PASSWORD == ""
-    admin_pass_default = inspect.signature(reloaded.KeycloakBridgeClient.__init__).parameters[
-        "admin_pass"
-    ].default
-    assert admin_pass_default == ""
+    assert not hasattr(reloaded, "KEYCLOAK_ADMIN_USER")
+    assert not hasattr(reloaded, "KEYCLOAK_ADMIN_PASSWORD")
+    parameters = inspect.signature(reloaded.KeycloakBridgeClient.__init__).parameters
+    assert parameters["admin_user"].default == ""
+    assert parameters["admin_pass"].default == ""
 
 
 @pytest.mark.parametrize(
@@ -213,57 +220,48 @@ def test_409_same_uin_resets_password_and_is_not_created(monkeypatch):
     def post(url, data=None, json=None, headers=None, timeout=None):
         calls.append(f"POST {url}")
         if url.endswith("/protocol/openid-connect/token"):
-            assert data["password"] == ADMIN_PASSWORD
+            assert data["grant_type"] == "client_credentials"
+            assert "password" not in data
             assert CITIZEN_PASSWORD not in str(data)
             return FakeResponse(200, {"access_token": ADMIN_TOKEN})
         assert json["credentials"][0]["value"] == CITIZEN_PASSWORD
         return FakeResponse(409, text="User exists with same username")
 
-    def get(url, params=None, headers=None, timeout=None):
-        calls.append(f"GET {url}")
-        assert params == {"username": "ada", "exact": "true"}
-        assert CITIZEN_PASSWORD not in url
-        assert CITIZEN_PASSWORD not in str(params)
-        assert headers["Authorization"] == f"Bearer {ADMIN_TOKEN}"
-        return FakeResponse(200, [user_record([UIN])])
+    def get(*args, **kwargs):
+        raise AssertionError("409 must not look up a user to reset a password")
 
-    def put(url, json=None, headers=None, timeout=None):
-        calls.append(f"PUT {url}")
-        assert url.endswith("/users/user-1/reset-password")
-        assert json == {"type": "password", "value": CITIZEN_PASSWORD, "temporary": False}
-        assert CITIZEN_PASSWORD not in url
-        assert headers["Authorization"] == f"Bearer {ADMIN_TOKEN}"
-        return FakeResponse(204)
+    def put(*args, **kwargs):
+        raise AssertionError("409 must not call reset-password")
 
     monkeypatch.setattr(keycloak.requests, "post", post)
     monkeypatch.setattr(keycloak.requests, "get", get)
     monkeypatch.setattr(keycloak.requests, "put", put)
 
     result = make_client().provision_citizen(UIN, FULL_NAME, EMAIL, CITIZEN_PASSWORD)
-    assert result.ok is True
+    assert result.ok is False
     assert result.created is False
-    assert result.detail == "password reset"
-    assert bool(result) is True
+    assert result.detail == "account already exists"
+    assert "password" not in result.detail
+    assert bool(result) is False
     assert calls == [
-        "POST http://keycloak.test/auth/realms/master/protocol/openid-connect/token",
+        "POST http://keycloak.test/auth/realms/mosip/protocol/openid-connect/token",
         "POST http://keycloak.test/auth/admin/realms/mosip/users",
-        "GET http://keycloak.test/auth/admin/realms/mosip/users",
-        "PUT http://keycloak.test/auth/admin/realms/mosip/users/user-1/reset-password",
     ]
+    assert not any("reset-password" in call for call in calls)
 
 
 @pytest.mark.parametrize(
-    ("record", "detail"),
+    "record",
     [
-        (user_record(["9999999999"]), "existing user uin mismatch"),
-        (user_record([UIN, "9999999999"]), "existing user uin mismatch"),
-        (user_record(None), "existing user uin missing"),
-        (user_record([]), "existing user uin missing"),
-        (user_record([""]), "existing user uin missing"),
-        (user_record(include_attributes=False), "existing user uin missing"),
+        user_record(["9999999999"]),
+        user_record([UIN, "9999999999"]),
+        user_record(None),
+        user_record([]),
+        user_record([""]),
+        user_record(include_attributes=False),
     ],
 )
-def test_409_without_matching_uin_is_not_success(monkeypatch, record, detail):
+def test_409_without_matching_uin_is_not_success(monkeypatch, record):
     put_called = False
 
     def post(url, data=None, json=None, headers=None, timeout=None):
@@ -286,7 +284,7 @@ def test_409_without_matching_uin_is_not_success(monkeypatch, record, detail):
     result = make_client().provision_citizen(UIN, FULL_NAME, EMAIL, CITIZEN_PASSWORD)
     assert result.ok is False
     assert result.created is False
-    assert result.detail == detail
+    assert result.detail == "account already exists"
     assert put_called is False
 
 
@@ -300,25 +298,25 @@ def test_409_string_uin_attribute_matches(monkeypatch):
         return FakeResponse(200, [user_record(f"  {UIN}  ")])
 
     def put(url, json=None, headers=None, timeout=None):
-        assert json["value"] == CITIZEN_PASSWORD
-        return FakeResponse(204)
+        raise AssertionError("409 must not call reset-password")
 
     monkeypatch.setattr(keycloak.requests, "post", post)
     monkeypatch.setattr(keycloak.requests, "get", get)
     monkeypatch.setattr(keycloak.requests, "put", put)
 
     result = make_client().provision_citizen(UIN, FULL_NAME, EMAIL, CITIZEN_PASSWORD)
-    assert result.ok is True
+    assert result.ok is False
     assert result.created is False
+    assert result.detail == "account already exists"
 
 
 def test_409_lookup_or_reset_failure_is_not_success(monkeypatch):
     cases = [
-        ("lookup-status", FakeResponse(500, text=CITIZEN_PASSWORD), None, "user lookup failed"),
-        ("lookup-empty", FakeResponse(200, []), None, "existing user not found"),
-        ("lookup-error", requests.ConnectionError("down"), None, "network error"),
-        ("reset-status", FakeResponse(200, [user_record([UIN])]), FakeResponse(400, text=CITIZEN_PASSWORD), "password reset failed"),
-        ("reset-error", FakeResponse(200, [user_record([UIN])]), requests.Timeout("slow"), "network error"),
+        ("lookup-status", FakeResponse(500, text=CITIZEN_PASSWORD), None, "account already exists"),
+        ("lookup-empty", FakeResponse(200, []), None, "account already exists"),
+        ("lookup-error", requests.ConnectionError("down"), None, "account already exists"),
+        ("reset-status", FakeResponse(200, [user_record([UIN])]), FakeResponse(400, text=CITIZEN_PASSWORD), "account already exists"),
+        ("reset-error", FakeResponse(200, [user_record([UIN])]), requests.Timeout("slow"), "account already exists"),
     ]
 
     for name, lookup, reset, detail in cases:
@@ -362,6 +360,33 @@ def test_secrets_are_not_logged(monkeypatch, caplog):
     assert CITIZEN_PASSWORD not in logged
     assert ADMIN_PASSWORD not in logged
     assert ADMIN_TOKEN not in logged
+
+
+def test_service_account_token_uses_the_application_realm(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG, logger="register_id.keycloak")
+    secret = "service-account-secret"
+    seen: dict[str, Any] = {}
+
+    def post(url, data=None, json=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["data"] = data
+        return FakeResponse(401, text=secret)
+
+    monkeypatch.setattr(keycloak.requests, "post", post)
+    client = keycloak.KeycloakBridgeClient(
+        base_url="http://keycloak.test/auth",
+        admin_user="",
+        admin_pass="",
+        realm="mosip",
+        client_id="register-id",
+        client_secret=secret,
+    )
+    assert client.get_admin_token() is None
+    assert seen["url"] == "http://keycloak.test/auth/realms/mosip/protocol/openid-connect/token"
+    assert seen["data"]["grant_type"] == "client_credentials"
+    assert seen["data"]["client_id"] == "register-id"
+    assert "password" not in seen["data"]
+    assert secret not in caplog.text
 
 
 def _scalar_items(value: Any, key: str = ""):

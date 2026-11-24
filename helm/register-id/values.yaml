@@ -1,0 +1,120 @@
+## Labels applied to every resource. Matches other MOSIP charts.
+commonLabels:
+  app.kubernetes.io/component: mosip
+
+commonAnnotations: {}
+
+replicaCount: 1
+
+## CI still pushes ghcr.io/mosip-asia/dpi-register-id. The Kit cannot pull GHCR
+## anonymously. Set registry, repository, and digest to the mirrored copy
+## (Docker Hub or another registry the Kit can pull). Empty digest renders
+## registry/repository:tag for local helm template only.
+image:
+  registry: ghcr.io
+  repository: mosip-asia/dpi-register-id
+  tag: "0.1.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+## Public host the Sandbox Kit routes. This chart does not render an Ingress.
+## Host is <hostname>.<domain>, one label under the environment domain.
+## register.id.<domain> is rejected by the Sandbox Kit.
+## sandbox.example.net -> register.sandbox.example.net
+publicHost:
+  hostname: register
+  domain: ""
+  ## Full host. When set, hostname and domain are ignored.
+  host: ""
+
+environment: dev
+logLevel: INFO
+
+## Non-secret MOSIP endpoints. Secrets stay in existingSecret.
+mosip:
+  idrepoBaseUrl: ""
+  authmanagerUrl: ""
+  appId: regproc
+  httpTimeout: "10"
+  httpRetries: "2"
+  httpBackoffSeconds: "0.5"
+  idgeneratorBaseUrl: "http://idgenerator.kernel"
+  inprocessFallback: "false"
+  enrollSuccessLimit: "100"
+
+keycloak:
+  ## Browser host, iam.<domain>. url and internalUrl must both be set and should differ.
+  url: ""
+  ## In-cluster host for token and admin calls. Must be set with url, and should differ from it.
+  internalUrl: ""
+  realm: mosip
+  adminClientId: ""
+  oidcClientId: register-id
+  ## https://register.<domain>/api/login/callback
+  redirectUri: ""
+
+## Secret keys the Kit supplies. The chart does not render secret values.
+## MOSIP_CLIENT_ID, MOSIP_SECRET_KEY, KEYCLOAK_ADMIN_CLIENT_SECRET,
+## KEYCLOAK_OIDC_CLIENT_SECRET, REDIS_URL, DJANGO_SECRET_KEY,
+## APPLICATION_STORE_KEY, REGISTER_ID_OPERATOR_TOKEN, EMAIL_PASSWORD
+existingSecret: ""
+
+## Extra environment entries, each {name, value} or {name, valueFrom}.
+extraEnv: []
+
+## Same shape as extraEnv. The Sandbox Kit sets this key. Both lists are applied.
+extraEnvVars: []
+
+## Kit pod securityContext. Applied with podSecurityContext.
+## On a duplicate key, securityContext wins. containerSecurityContext is unchanged.
+securityContext: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+livenessProbe:
+  path: /health
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+readinessProbe:
+  path: /ready
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3

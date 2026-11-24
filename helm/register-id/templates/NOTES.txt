@@ -1,0 +1,17 @@
+register-id is installed.
+
+Image: {{ include "register-id.image" . }}
+{{- if not .Values.image.digest }}
+
+Set image.registry, image.repository, and image.digest to the mirrored image. The Kit deploy sets image.digest to the mirrored digest and does not pull GHCR anonymously. The Sandbox Kit rejects a floating tag.
+{{- end }}
+The Sandbox Kit owns Ingress. This chart does not render one.
+{{- $publicHost := include "register-id.host" . | trim }}
+{{- if $publicHost }}
+
+Public host: {{ $publicHost }}
+{{- end }}
+{{- if not .Values.existingSecret }}
+
+existingSecret is empty. Point it at a Secret that holds MOSIP_CLIENT_ID, MOSIP_SECRET_KEY, KEYCLOAK_ADMIN_CLIENT_SECRET, and REDIS_URL.
+{{- end }}

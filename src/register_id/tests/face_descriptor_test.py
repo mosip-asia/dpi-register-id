@@ -38,6 +38,8 @@ GOOD_YAWS = [-0.6, -0.3, 0.0, 0.3, 0.6]
 @pytest.fixture
 def idrepo(monkeypatch: pytest.MonkeyPatch, tmp_path) -> IDRepoClient:
     monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setenv("FILE_STORE", "1")
+    monkeypatch.setenv("AUDIT_BACKEND", "file")
     monkeypatch.setenv("LOG_DIR", str(tmp_path))
     monkeypatch.setenv("REGISTER_ID_OPERATOR_TOKEN", "face-reader")
     monkeypatch.setenv("REGISTER_ID_OPERATOR_ROLE", "reader")
@@ -94,16 +96,24 @@ def _model(challenge_id: str, blinks: int = 1, yaws: list[float] | None = None) 
 
 def _enroll(uin: str, descriptors: list[list[float]], **overrides) -> object:
     body = {
-        "uin": uin,
         "fullName": "Descriptor Citizen",
         "email": "descriptor@citizen.asia",
+        "gender": "Female",
+        "dateOfBirth": "1990-01-02",
         "faceImage": _image(f"portrait-{uin}"),
         "faceDescriptors": descriptors,
         "liveness": _liveness(_challenge("enroll")),
         "consent": _consent(),
     }
     body.update(overrides)
-    return client.post("/api/enroll", json=body, headers=enroll_headers())
+    from register_id.idrepo_client import IDRepoClient
+
+    original = IDRepoClient.generate_uin
+    IDRepoClient.generate_uin = lambda self, _uin=uin: _uin
+    try:
+        return client.post("/api/enroll", json=body, headers=enroll_headers())
+    finally:
+        IDRepoClient.generate_uin = original
 
 
 def _seed_gallery(idrepo: IDRepoClient, uin: str, descriptors: list[list[float]]) -> None:
@@ -300,7 +310,6 @@ def test_enroll_requires_descriptors_and_liveness_together(idrepo):
     assert only_descriptors.status_code == 422
 
     body = {
-        "uin": uin,
         "fullName": "Half Request",
         "email": "half@citizen.asia",
         "faceImage": _image("half"),
@@ -322,23 +331,21 @@ def test_enroll_with_descriptors_stores_a_draft_and_the_face_templates(idrepo):
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["status"] == "SUCCESS"
-    assert body["recordStatus"] == "draft"
+    assert body["recordStatus"] == "biometric"
     assert body["cbeffGenerated"] is True
     assert "faceEngine" not in body
     assert "livenessSource" not in body
     assert "templateCount" not in body
-    assert body["message"] == (
-        "Citizen demographics stored as a draft via MOSIP IDRepo interface. "
-        "The browser report is not a server liveness check."
-    )
+    assert body["message"] == "Citizen identity stored via MOSIP IDRepo interface"
 
+    plain = idrepo.get_identity(uin)
+    assert plain is not None
+    assert portrait not in json.dumps(plain)
     stored = idrepo.get_identity(uin, include_biometrics=True)
-    assert stored["status"] == "draft"
+    assert stored["status"] == "biometric"
     assert stored["full_name"] == "Descriptor Citizen"
     assert stored["email"] == "descriptor@citizen.asia"
-    assert not stored.get("face_image")
-    assert not stored.get("cbeff_xml")
-    assert portrait not in json.dumps(stored)
+    assert stored.get("cbeff_xml")
     templates = idrepo.get_face_templates(uin)
     face_rows = [row for row in templates if row.get("engine") == FACE_DESCRIPTOR_ENGINE]
     hash_rows = [row for row in templates if row.get("engine") == "hash"]
@@ -381,7 +388,6 @@ def test_enroll_without_descriptors_stays_a_hash_draft(idrepo):
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": uin,
             "fullName": "Hash Citizen",
             "email": "hash@citizen.asia",
             "faceImage": portrait,
@@ -390,6 +396,7 @@ def test_enroll_without_descriptors_stays_a_hash_draft(idrepo):
     )
     assert res.status_code == 200
     body = res.json()
+    uin = body["uin"]
     assert body["recordStatus"] == "draft"
     assert "faceEngine" not in body
     stored = idrepo.get_identity(uin, include_biometrics=True)
@@ -481,7 +488,6 @@ def test_authenticate_hash_only_identity_asks_to_enroll_again(idrepo):
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": uin,
             "fullName": "Hash Only",
             "email": "hash-only@citizen.asia",
             "faceImage": _image(f"hash-only-{uin}"),
@@ -489,6 +495,7 @@ def test_authenticate_hash_only_identity_asks_to_enroll_again(idrepo):
         },
     )
     assert enrolled.status_code == 200
+    uin = enrolled.json()["uin"]
 
     body = _check(uin, _descriptor(80)).json()
     assert body["compared"] is False
@@ -554,7 +561,7 @@ def test_descriptors_stay_out_of_operator_reads_and_audit(idrepo):
     base = _descriptor(100)
     enrolled = _enroll(uin, [base, _noisy(base, 101)])
     assert enrolled.status_code == 200
-    assert enrolled.json()["recordStatus"] == "draft"
+    assert enrolled.json()["recordStatus"] == "biometric"
     _seed_gallery(idrepo, uin, [base, _noisy(base, 101)])
     _check(uin, _noisy(base, 102))
     _check(uin, _descriptor(103))
@@ -582,9 +589,7 @@ def test_descriptors_stay_out_of_operator_reads_and_audit(idrepo):
 
     events = [e for e in audit.json() if e["uin"] == uin]
     assert [e["kind"] for e in events] == ["enroll", "authenticate", "authenticate", "operator"]
-    assert "draft stored" in events[0]["detail"]
-    assert "browser report is not a server liveness check" in events[0]["detail"]
-    assert "biometric" not in events[0]["detail"]
+    assert "biometric stored" in events[0]["detail"]
     assert "match at distance" in events[1]["detail"]
     assert "no match at distance" in events[2]["detail"]
 

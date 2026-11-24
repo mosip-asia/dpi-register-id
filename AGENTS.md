@@ -41,6 +41,7 @@ This document defines the architectural patterns, operational invariants, and wo
 
 ## 3. Configuration & Docker Compose Invariants
 
+* **Where Compose runs:** Docker Compose is for local development. Staging and production are the Helm chart in [`helm/register-id`](helm/register-id). The Sandbox Kit owns ingress. Keep [`docker-compose.traefik.yml`](docker-compose.traefik.yml); it is an optional local overlay, not the staging or production deploy path.
 * **Single Environment Template (`.env.example`):**
   - Do **not** reintroduce `local.env` or multiple `.env.*.example` files.
   - Local setup is always `cp .env.example .env`.
@@ -51,7 +52,7 @@ This document defines the architectural patterns, operational invariants, and wo
   - Services use explicit `environment:` mappings in `docker-compose.yml` instead of `env_file:` to clearly define container contracts and isolate container networking (e.g. `redis://:${REDIS_PASSWORD}@redis:6379/0`) from host `localhost`.
 * **Traefik Reverse Proxy Overlay:**
   - In local development, the app maps ports directly to `http://localhost:8000` (`COMPOSE_FILE=docker-compose.yml`).
-  - In deployed environments behind a shared Traefik gateway, enable the overlay in the server's `.env`:
+  - For an optional local Traefik overlay, set in `.env`:
     ```ini
     COMPOSE_FILE=docker-compose.yml:docker-compose.traefik.yml
     APP_HOSTNAME_DOMAIN=api-stg.ait.ac.th

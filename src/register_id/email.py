@@ -1,10 +1,11 @@
 """
 SMTP enrollment confirmation mailer.
 
-Sends the citizen their UIN after a successful enroll. Credentials come from
-EMAIL_PROVIDER, EMAIL_FROM, and EMAIL_PASSWORD. An empty provider skips sending
-so local runs without SMTP stay usable. Enrollment does not roll back when
-mail fails.
+Sends the citizen their UIN after a successful enroll. The destination is
+SMTP_HOST and SMTP_PORT, or the EMAIL_PROVIDER=gmail shortcut. An empty
+destination skips sending so local runs without SMTP stay usable. Username
+and password are optional. STARTTLS is on unless SMTP_STARTTLS is 0, false,
+no, or off. Enrollment does not roll back when mail fails.
 
 When the citizen opts in, the HTML part can carry the browser-drawn ID card.
 The face photo is never attached. A bad card image is left out; mail still sends.
@@ -27,7 +28,7 @@ import segno
 
 logger = logging.getLogger(__name__)
 
-# host, port — STARTTLS on submission port 587 for every supported provider.
+# host, port — submission port 587. STARTTLS follows SMTP_STARTTLS (default on).
 _PROVIDERS: Final[dict[str, tuple[str, int]]] = {
     "gmail": ("smtp.gmail.com", 587),
 }
@@ -95,20 +96,19 @@ def send_enrollment_email(
     short detail when delivery fails. Never raises for SMTP errors.
     """
     provider = (os.getenv("EMAIL_PROVIDER") or "").strip().lower()
-    sender = (os.getenv("EMAIL_FROM") or "").strip()
-    password = os.getenv("EMAIL_PASSWORD") or ""
+    sender = (os.getenv("EMAIL_FROM") or os.getenv("SMTP_USER") or "").strip()
+    password = os.getenv("EMAIL_PASSWORD") or os.getenv("SMTP_PASSWORD") or ""
     recipient = (to or "").strip()
+    host, port, known = _smtp_target(provider)
 
-    if not provider:
-        return EmailResult(sent=False, skipped=True, detail="email provider unset")
-    if provider not in _PROVIDERS:
+    if provider and not known:
         return EmailResult(sent=False, skipped=True, detail=f"unknown email provider {provider}")
-    if not sender or not password:
+    if not known and not host:
+        return EmailResult(sent=False, skipped=True, detail="email provider unset")
+    if not sender:
         return EmailResult(sent=False, skipped=True, detail="email credentials incomplete")
     if not recipient or "@" not in recipient:
         return EmailResult(sent=False, skipped=True, detail="recipient email missing")
-
-    host, port = _PROVIDERS[provider]
     message = _build_message(
         sender=sender,
         to=recipient,
@@ -233,6 +233,32 @@ def _row(inner: str, style: str) -> str:
     return f'<tr><td style="{style}">{inner}</td></tr>'
 
 
+def _smtp_target(provider: str) -> tuple[str, int, bool]:
+    """Generic SMTP_HOST wins. EMAIL_PROVIDER=gmail remains the named shortcut."""
+    host = (os.getenv("SMTP_HOST") or "").strip()
+    if host:
+        raw_port = (os.getenv("SMTP_PORT") or "587").strip()
+        try:
+            port = int(raw_port)
+        except ValueError:
+            port = 587
+        return host, port, True
+    if not provider:
+        return "", 587, False
+    if provider not in _PROVIDERS:
+        return "", 587, False
+    known_host, known_port = _PROVIDERS[provider]
+    return known_host, known_port, True
+
+
+def _starttls_enabled() -> bool:
+    """STARTTLS unless SMTP_STARTTLS is 0, false, no, or off. Unset stays on."""
+    raw = (os.getenv("SMTP_STARTTLS") or "").strip().lower()
+    if not raw:
+        return True
+    return raw not in {"0", "false", "no", "off"}
+
+
 def _deliver(
     *,
     host: str,
@@ -241,10 +267,11 @@ def _deliver(
     password: str,
     message: EmailMessage,
 ) -> None:
-    context = ssl.create_default_context()
     with smtplib.SMTP(host, port, timeout=20) as smtp:
         smtp.ehlo()
-        smtp.starttls(context=context)
-        smtp.ehlo()
-        smtp.login(sender, password)
+        if _starttls_enabled():
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.ehlo()
+        if password:
+            smtp.login(sender, password)
         smtp.send_message(message)

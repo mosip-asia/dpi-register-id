@@ -48,6 +48,13 @@ def _sweep_challenge() -> str:
 def test_enroll_returns_502_when_idrepo_write_fails(monkeypatch):
     class FailingRepo:
         last_error = "connection refused"
+        last_status = 502
+
+        def generate_uin(self) -> str:
+            return "9876543210"
+
+        def _make_rid(self) -> str:
+            return "10025100090000120260101120000"
 
         def add_identity(self, **kwargs: object) -> bool:
             del kwargs
@@ -67,7 +74,6 @@ def test_enroll_returns_502_when_idrepo_write_fails(monkeypatch):
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": uin,
             "fullName": "Failed Write",
             "email": "fail@citizen.asia",
             "faceImage": _data_url(b"mock-face-bytes-write-fail"),
@@ -89,6 +95,25 @@ def test_enroll_returns_502_when_idrepo_write_fails(monkeypatch):
     assert "idrepo" in captured[-1]["detail"]
 
 
+def test_inprocess_enroll_success_names_the_mock_backend(monkeypatch):
+    local = IDRepoClient(base_url="http://127.0.0.1:9", enable_inprocess_fallback=True)
+    monkeypatch.setattr("register_id.api.get_idrepo_client", lambda: local)
+    res = client.post(
+        "/api/enroll",
+        headers=enroll_headers(),
+        json={
+            "fullName": "Mock Backend",
+            "email": "mock-backend@citizen.asia",
+            "faceImage": _data_url(b"mock-face-bytes-backend-label"),
+            "consent": _consent(),
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "SUCCESS"
+    assert body["backend"] == "inprocess-idrepo"
+
+
 def test_api_check_liveness_endpoint():
     payload = {
         "blinkCount": 2,
@@ -106,10 +131,7 @@ def test_api_check_liveness_endpoint():
 def test_api_enroll_and_authenticate_flow(monkeypatch):
     face_image = _data_url(b"mock-face-bytes-enroll-front")
     other_image = _data_url(b"mock-face-bytes-impostor-probe")
-    uin = "9876-5432-1098"
-
     enroll_payload = {
-        "uin": uin,
         "fullName": "Test Citizen",
         "email": "test@citizen.asia",
         "faceImage": face_image,
@@ -120,8 +142,8 @@ def test_api_enroll_and_authenticate_flow(monkeypatch):
     assert enroll_res.status_code == 200
     enroll_data = enroll_res.json()
     assert enroll_data["status"] == "SUCCESS"
-    assert enroll_data["uin"] == uin
-    assert enroll_data["cbeffGenerated"] is True
+    uin = enroll_data["uin"]
+    assert enroll_data["cbeffGenerated"] is False
     assert "keycloakProvisioned" not in enroll_data
 
     idrepo = IDRepoClient(enable_inprocess_fallback=True)
@@ -205,7 +227,6 @@ def test_api_enroll_and_authenticate_head_sweep():
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": uin,
             "fullName": "Sweep Citizen",
             "email": "sweep@citizen.asia",
             "faceImage": _data_url(b"sweep-portrait-for-cbeff"),
@@ -235,7 +256,6 @@ def test_api_enroll_and_authenticate_head_sweep():
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": "9876-5432-1101",
             "fullName": "Weak Turn",
             "email": "weak@citizen.asia",
             "faceImage": _data_url(b"weak-turn-portrait"),
@@ -260,7 +280,6 @@ def test_api_enroll_and_authenticate_head_sweep():
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": "9876-5432-1102",
             "fullName": "Copied Pose",
             "email": "copied@citizen.asia",
             "faceImage": _data_url(b"copied-portrait"),
@@ -378,7 +397,6 @@ def test_api_enroll_and_authenticate_head_sweep():
 def test_enroll_rejects_password_and_client_embedding():
     image = _data_url(b"reject-extra-fields")
     base = {
-        "uin": "9876-5432-1300",
         "fullName": "Reject Extra",
         "email": "reject@citizen.asia",
         "faceImage": image,
@@ -400,15 +418,14 @@ def test_api_credentials_issue_after_enroll():
 
     missing = client.post(
         "/api/credentials",
-        json={"uin": "9876-5432-1499", "password": password},
+        json={"uin": "9876-5432-1499", "password": password, "credentialTicket": "not-the-enrol-ticket"},
     )
-    assert missing.status_code == 404
+    assert missing.status_code == 401
 
     enroll_res = client.post(
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": uin,
             "fullName": "Credential Citizen",
             "email": "credential@citizen.asia",
             "faceImage": image,
@@ -417,8 +434,16 @@ def test_api_credentials_issue_after_enroll():
     )
     assert enroll_res.status_code == 200
     assert "keycloakProvisioned" not in enroll_res.json()
+    uin = enroll_res.json()["uin"]
 
-    issued = client.post("/api/credentials", json={"uin": uin, "password": password})
+    issued = client.post(
+        "/api/credentials",
+        json={
+            "uin": uin,
+            "password": password,
+            "credentialTicket": enroll_res.json()["credentialTicket"],
+        },
+    )
     assert issued.status_code == 502
     assert "Keycloak did not store the login" in issued.json()["detail"]
 
@@ -431,7 +456,6 @@ def _enroll_body(uin: str, *, accepted: bool = True) -> dict:
     consent = _consent()
     consent["accepted"] = accepted
     return {
-        "uin": uin,
         "fullName": "Limited Citizen",
         "email": "limited@citizen.asia",
         "faceImage": _data_url(b"enroll-limit-face-marker"),
@@ -443,52 +467,44 @@ def _stored(uin: str):
     return IDRepoClient(enable_inprocess_fallback=True).get_identity(uin)
 
 
-def test_enroll_does_not_require_a_shared_token():
-    uin = "4290-0000-8001"
-    body = _enroll_body(uin)
-
+def test_enroll_requires_a_server_ticket_and_hides_it_from_html():
+    body = _enroll_body("unused")
     missing = client.post("/api/enroll", json=body)
-    assert missing.status_code == 200, missing.text
+    assert missing.status_code == 401
     assert TEST_ENROLL_TOKEN not in missing.text
-    assert body["faceImage"] not in missing.text
-    assert _stored(uin) is not None
+    assert "test-enroll-token" not in missing.text
+
+    issued = client.post("/api/enroll/ticket")
+    assert issued.status_code == 200
+    ticket = issued.json()["ticket"]
+    saved = client.post("/api/enroll", headers={"X-Enroll-Ticket": ticket}, json=body)
+    assert saved.status_code == 200, saved.text
+    assert ticket not in saved.text
+    assert body["faceImage"] not in saved.text
+    again = client.post("/api/enroll", headers={"X-Enroll-Ticket": ticket}, json=body)
+    assert again.status_code == 409
 
 
-def test_enroll_rate_limit_blocks_the_31st_success_and_ignores_validation_failures(monkeypatch):
+def test_enroll_rate_limit_is_per_ticket(monkeypatch):
     monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setenv("FILE_STORE", "1")
+    monkeypatch.setenv("AUDIT_BACKEND", "file")
+    monkeypatch.setenv("ENROLL_SUCCESS_LIMIT", "1")
     rejected = client.post(
         "/api/enroll",
         headers=enroll_headers(),
         json=_enroll_body("4290-0000-8100", accepted=False),
     )
     assert rejected.status_code == 422
-    assert _stored("4290-0000-8100") is None
 
-    for index in range(ENROLL_SUCCESS_LIMIT):
-        uin = f"4291-{index:04d}-0000"
-        response = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body(uin))
-        assert response.status_code == 200, response.text
-        assert _stored(uin) is not None
+    ticket = enroll_headers()
+    first = client.post("/api/enroll", headers=ticket, json=_enroll_body("one"))
+    assert first.status_code == 200, first.text
+    second = client.post("/api/enroll", headers=ticket, json=_enroll_body("two"))
+    assert second.status_code == 409
 
-    blocked_uin = "4291-0030-0000"
-    blocked = client.post("/api/enroll", json=_enroll_body(blocked_uin))
-    assert blocked.status_code == 429
-    assert blocked.json()["detail"] == "Enrollment rate limit exceeded."
-    assert TEST_ENROLL_TOKEN not in blocked.text
-    assert _enroll_body(blocked_uin)["faceImage"] not in blocked.text
-    assert _stored(blocked_uin) is None
-
-    other = _enroll_body("4291-0031-0000")
-    other["email"] = "Someone-Else@citizen.asia"
-    allowed = client.post("/api/enroll", json=other)
-    assert allowed.status_code == 200, allowed.text
-    assert _stored("4291-0031-0000") is not None
-
-    same_person = _enroll_body("4291-0032-0000")
-    same_person["email"] = "  Limited@Citizen.asia  "
-    still_blocked = client.post("/api/enroll", json=same_person)
-    assert still_blocked.status_code == 429
-    assert _stored("4291-0032-0000") is None
+    other = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body("three"))
+    assert other.status_code == 200, other.text
 
 
 def test_memory_enroll_window_resets_when_the_hour_passes(monkeypatch):
@@ -542,6 +558,8 @@ def test_enroll_limit_uses_redis_and_fails_closed_when_it_is_down(monkeypatch):
         return RedisEnrollLimiter(client=holder["client"])
 
     monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setenv("FILE_STORE", "1")
+    monkeypatch.setenv("AUDIT_BACKEND", "file")
     monkeypatch.setattr("register_id.enroll_limit.get_enroll_limiter", selected)
 
     uin = "4292-0000-0001"
@@ -554,7 +572,7 @@ def test_enroll_limit_uses_redis_and_fails_closed_when_it_is_down(monkeypatch):
     assert TEST_ENROLL_TOKEN not in key
     assert "limited@citizen.asia" not in key
     assert _enroll_body(uin)["faceImage"] not in key
-    assert _stored(uin) is not None
+    assert _stored(saved.json()["uin"]) is not None
 
     holder["client"] = DownRedis()
     blocked_uin = "4292-0000-0002"

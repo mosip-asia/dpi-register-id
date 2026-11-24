@@ -17,11 +17,11 @@ In sovereign deployments, the Modular Open Source Identity Platform (MOSIP) mand
 * **Complex Backend Infrastructure:** Biometric packets are encrypted and processed through a 17-pod batch decryption pipeline (`regproc-*`), consuming over 35 GB of RAM.
 
 ### 1.2 The `register-id` Solution
-`register-id` eliminates the hardware and desktop client barriers by providing a **zero-hardware, browser-based citizen onboarding portal** (`https://register.id.<domain>`):
+`register-id` eliminates the hardware and desktop client barriers by providing a **zero-hardware, browser-based citizen onboarding portal** (`https://register.<domain>`):
 1. **Zero Hardware Requirement:** Any citizen or student can enroll using a standard HTML5 WebRTC browser webcam on a desktop, laptop, or mobile phone.
 2. **ISO/IEC 30107-3 Liveness (PAD):** Client-side presentation attack detection evaluates real-time Eye Aspect Ratio (EAR) and natural eye blinks to reject printed photos, video replays, and deepfakes.
 3. **ISO 19794-5 & ISO 19785-3 CBEFF Serialization:** Packages webcam frames into standard ISO/IEC 19794-5 binary payloads (`FAC\0`) enveloped in ISO 19785-3 CBEFF XML, maintaining 100% data compatibility with MOSIP IDRepo and downstream AI-BioSDK matchers.
-4. **Direct Substrate Seeding:** Integrates directly with MOSIP IDRepo (`POST /idrepository/v1/identity`) and Keycloak IAM (`mosip` realm) to allocate a Unique Identification Number (UIN) and provision user credentials for eSignet OIDC login within seconds.
+4. **Direct Substrate Seeding:** Enrolment stops at MOSIP IDRepo (`POST /idrepository/v1/identity`), which allocates a Unique Identification Number (UIN). A separate credential call provisions the Keycloak user in the `mosip` realm. This path does not call eSignet or Inji.
 
 ---
 
@@ -63,9 +63,9 @@ flowchart TD
     APIRouter -->|"Package Biometrics"| CBEFFBuilder
     CBEFFBuilder -->|"POST /idrepository/v1/identity"| IDRepo
     IDRepo -->|"Store Identity & CBEFF"| PostgresDB
-    APIRouter -->|"Provision Citizen Account"| Keycloak
-    Keycloak -.->|"Authenticate Citizen"| eSignet
-    eSignet -.->|"Issue Verifiable Credential"| Wallet
+    APIRouter -->|"Separate credential call"| Keycloak
+    Keycloak -.->|"Not called by enrolment"| eSignet
+    eSignet -.->|"Not required on this path"| Wallet
     IDRepo -.->|"Verify Face Probe"| BioSDK
 ```
 
@@ -79,7 +79,7 @@ flowchart TD
 | **OBJ-2** | **ISO 30107-3 Liveness PAD** | Enforce anti-spoofing to reject 2D printouts and replay attacks. | Tracks 68 facial landmarks; computes Eye Aspect Ratio ($EAR < 0.23, \Delta \ge 0.06$); requires $\ge 1$ natural blink. |
 | **OBJ-3** | **CBEFF ISO 19794-5 Serialization** | Format captured face biometrics into standard MOSIP format. | Generates valid ISO 19794-5 `FAC\0` binary payloads wrapped in ISO 19785-3 CBEFF XML headers. |
 | **OBJ-4** | **MOSIP IDRepo Seeding** | Direct persistence into master citizen identity database. | Seeds `mosip_idrepo.citizen_identity` and interfaces with IDRepo REST endpoints (`POST /idrepository/v1/identity`). |
-| **OBJ-5** | **Keycloak IAM Integration** | Synchronize citizen accounts for eSignet OIDC login. | Automates Keycloak Admin API token exchange; creates user in `mosip` realm with `uin` attribute and password. |
+| **OBJ-5** | **Keycloak IAM Integration** | Separate credential call after IDRepo. Enrolment does not call eSignet or Inji. | Automates Keycloak Admin API token exchange; creates user in `mosip` realm with `uin` attribute and password. |
 | **OBJ-6** | **AI-BioSDK Interoperability** | Verify enrolled gallery against live webcam probes. | End-to-end 1:1 biometric authentication succeeds against `ai-biosdk-service` with Cosine Similarity $\ge 0.68$. |
 | **OBJ-7** | **CI/CD & Operational Symmetry** | Ensure staging/production alignment with automated rollbacks. | Passes `scripts/check.sh` (data guard, tests, django check); deploys via GitHub Actions (`cd.yml`). |
 
@@ -155,7 +155,7 @@ gantt
   - [x] Implement pure HTTP REST client in `src/register_id/idrepo_client.py` calling MOSIP IDRepo `POST /idrepository/v1/identity` and `GET /idrepository/v1/identity/uin/{uin}`.
   - [x] Implement dedicated MOSIP IDRepo mock REST service container (`src/register_id/mock_idrepo.py`) in `docker-compose.mosip.yml` with PostgreSQL 15 and SQLite fallback.
   - [x] Implement Keycloak IAM bridge in `src/register_id/keycloak.py`:
-    * Admin token acquisition via `client_id: admin-cli`.
+    * Admin token acquisition via `client_credentials` on the application realm.
     * User account creation in `mosip` realm with `uin`, name, email, and password.
     * Attribution of `individualBiometrics: VALID` claim.
   - [x] Add local Docker Compose services for IDRepo, Keycloak, and Postgres with automated schema initialization.
@@ -195,7 +195,7 @@ gantt
   - [ ] Tag release `v0.2.0` from `dev` and push to build GHCR container image (`ghcr.io/mosip-asia/dpi-register-id`).
   - [ ] Open promotion PR to `stg` branch (`bash scripts/release.sh pr stg`).
   - [ ] Validate automated CD workflow (`.github/workflows/cd.yml`) deploying to Staging environment via NetBird VPN mesh.
-  - [ ] Execute automated post-deployment smoke tests (`scripts/smoke-test.sh https://register.id.stg.ait.ac.th`).
+  - [ ] Execute automated post-deployment smoke tests (`scripts/smoke-test.sh https://register.stg.ait.ac.th`).
   - [ ] Finalize Milestone 1.5.3 code freeze.
 * **Exit Criteria:** Working Staging deployment accessible over public HTTPS with automated smoke test approval.
 
@@ -204,11 +204,11 @@ gantt
 ### Week 8 (01 Jan – 30 Jan 2027): Production Hardening & Milestone 1.5.4 Delivery
 * **Focus:** Multi-tenant stress testing, documentation sign-off, and final ecosystem integration.
 * **Deliverables:**
-  - [ ] End-to-end integration test with Inji Wallet and DOPA Verifiable Credential Issuer (`https://issuer.id.<domain>`).
+  - [ ] Confirm enrolment stops at IDRepo and the separate credential call. eSignet and Inji are not required on this path.
   - [ ] Concurrency testing: verify gateway handles 50 concurrent WebRTC enrollment sessions without memory leaks.
   - [ ] Open promotion PR from `stg` to `main` (`bash scripts/release.sh pr main`) for Production deployment.
   - [ ] Final security audit and compliance verification for Activity 1.5 grant milestone.
-* **Exit Criteria:** Production deployment live on `https://register.id.<domain>`; grant milestone accepted.
+* **Exit Criteria:** Production deployment live on `https://register.<domain>`; grant milestone accepted.
 
 ---
 

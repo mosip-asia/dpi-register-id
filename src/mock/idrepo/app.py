@@ -33,6 +33,25 @@ def _now_iso() -> str:
 
 _RECORD_STATUSES = frozenset({"draft", "biometric"})
 
+# Posted on the identity object, but stored and returned with the face document.
+_BIOMETRIC_IDENTITY_KEYS = frozenset({
+    "faceImage",
+    "faceEmbedding",
+    "faceViews",
+    "individualBiometrics",
+})
+
+
+def _posted_identity_fields(identity: dict) -> dict:
+    """Kit demographic fields from the request. Face bytes stay off this document."""
+    if not isinstance(identity, dict):
+        return {}
+    return {
+        key: value
+        for key, value in identity.items()
+        if key not in _BIOMETRIC_IDENTITY_KEYS
+    }
+
 
 def _full_name_value(full_name_raw) -> str:
     if isinstance(full_name_raw, list) and len(full_name_raw) > 0:
@@ -78,14 +97,17 @@ def _not_found(uin: str, message: str | None = None) -> HTTPException:
 
 
 def _identity_payload(record: dict, include_biometrics: bool) -> tuple[dict, list]:
-    identity = {
-        "UIN": record["uin"],
-        "fullName": [{"language": "eng", "value": record["full_name"]}],
-        "email": record.get("email"),
-        "createdAt": str(record.get("created_at")),
-        "recordStatus": record.get("status") or "draft",
-        "loginDisabled": bool(record.get("login_disabled")),
-    }
+    posted = record.get("identity_fields") or {}
+    identity = dict(posted)
+    if "UIN" not in identity:
+        identity["UIN"] = record["uin"]
+    if "fullName" not in identity:
+        identity["fullName"] = [{"language": "eng", "value": record.get("full_name") or ""}]
+    if "email" not in identity:
+        identity["email"] = record.get("email")
+    identity["createdAt"] = str(record.get("created_at"))
+    identity["recordStatus"] = record.get("status") or "draft"
+    identity["loginDisabled"] = bool(record.get("login_disabled"))
     documents: list = []
     if not include_biometrics:
         return identity, documents
@@ -160,7 +182,7 @@ def add_identity(payload: dict):
       "request": {
          "registrationId": "...",
          "status": "ACTIVATED",
-         "identity": { "UIN": "...", "fullName": [...], "email": "...", "faceImage": "..." },
+         "identity": { "UIN": "...", "fullName": [...], "dateOfBirth": "...", "gender": [...], "phone": "...", "email": "...", "addressLine1": [...] },
          "templates": [ { "sector": "front", "embedding": [0.1, "..."], "engine": "face-api-128" } ],
          "documents": [ { "category": "individualBiometrics", "value": "base64url..." } ]
       }
@@ -186,7 +208,7 @@ def add_identity(payload: dict):
     record_status = _record_status(req)
 
     email = identity.get("email")
-    face_image = identity.get("faceImage")
+    face_image = req.get("faceImage") or identity.get("faceImage")
     # Client faceEmbedding / faceViews are ignored. Vectors arrive as request.templates.
     templates = req.get("templates")
 
@@ -210,6 +232,7 @@ def add_identity(payload: dict):
         face_image=face_image,
         cbeff_xml=cbeff_xml,
         status=record_status,
+        identity_fields=_posted_identity_fields(identity),
     )
 
     if saved and templates is not None:

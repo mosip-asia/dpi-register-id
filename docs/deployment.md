@@ -1,6 +1,6 @@
 # CI/CD, Deployment & Traefik Overlay
 
-This document describes the deployment architecture, Traefik reverse proxy overlay, and remote host automation used across **dev**, **stg**, and **production** environments.
+This document describes local Docker Compose, the optional Traefik overlay, and the Helm chart. Docker Compose is for local development. Staging and production are the Helm chart. The Sandbox Kit owns ingress.
 
 ---
 
@@ -48,7 +48,7 @@ Configure two environments in GitHub (**Settings > Environments**): `staging` an
 
 ## 3. Traefik Reverse Proxy Overlay
 
-In staging and production, applications run behind a shared Traefik gateway that manages Let's Encrypt SSL/TLS certificates and listens on ports `80`/`443`.
+Docker Compose is for local development. Staging and production are the Helm chart in [`helm/register-id`](../helm/register-id). The Sandbox Kit owns ingress for those environments. [`docker-compose.traefik.yml`](../docker-compose.traefik.yml) remains an optional local overlay. It does not deploy staging or production.
 
 ### Local Development
 In local `.env`:
@@ -58,17 +58,25 @@ FASTAPI_PORT=8000
 ```
 Application maps directly to `http://localhost:8000`.
 
-### Remote Servers (dev / stg / prod)
-In the server's `.env`:
+### Optional local Traefik overlay
+On a local Compose stack only:
 ```ini
 COMPOSE_FILE=docker-compose.yml:docker-compose.traefik.yml
 APP_HOSTNAME_DOMAIN=api-stg.ait.ac.th
 ```
-Docker Compose automatically layers [`docker-compose.traefik.yml`](../docker-compose.traefik.yml), connects the container to the external `traefik_public` network, and registers routing and SSL with Traefik.
+Docker Compose layers [`docker-compose.traefik.yml`](../docker-compose.traefik.yml), connects the container to the external `traefik_public` network, and registers routing and SSL with Traefik. Staging and production do not use this overlay.
 
 ---
 
-## 4. Fail-Forward Policy & Rollback
+## 4. Sandbox Kit (Helm)
+
+The Sandbox Kit installs only Helm charts and pins every image by digest. Chart sources are in [`helm/register-id`](../helm/register-id). Docker Compose is for local development. Staging and production are this Helm chart. The Kit owns ingress.
+
+The public host is one label under the environment domain: `register.<domain>`. CI still pushes `ghcr.io/mosip-asia/dpi-register-id` and writes `ghcr.io/mosip-asia/dpi-register-id@sha256:…` in the job summary and the `image-digest` artifact. The Kit cannot pull that package anonymously. Mirror the image to Docker Hub or another registry the Kit can pull, then set `image.registry`, `image.repository`, and `image.digest` to the mirrored digest. The workflow does not change GHCR package visibility.
+
+`/health` is the liveness probe. `/ready` checks Redis and that configuration is loaded. It does not call IDRepo. The process logs to stdout and runs as uid 1000. MOSIP calls use an authmanager client id and secret. Keycloak admin calls use only a realm service account (`KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET`). `KEYCLOAK_PUBLIC_URL` is the browser host and `KEYCLOAK_INTERNAL_URL` is the in-cluster host.
+
+## 5. Fail-Forward Policy & Rollback
 
 - **Smoke Testing**: Every deployment executes `scripts/smoke-test.sh` verifying `/health`, index route, and Django checks before declaring success.
 - **Persistent Baseline (`.deploy_success`)**: The deployed commit SHA is saved in `.deploy_success` only after tests pass.

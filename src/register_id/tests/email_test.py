@@ -131,11 +131,47 @@ def test_send_skips_unknown_provider(monkeypatch: pytest.MonkeyPatch):
 
 def test_send_skips_incomplete_credentials(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("EMAIL_PROVIDER", "gmail")
-    monkeypatch.setenv("EMAIL_FROM", "sender@example.com")
-    monkeypatch.delenv("EMAIL_PASSWORD", raising=False)
+    monkeypatch.delenv("EMAIL_FROM", raising=False)
+    monkeypatch.delenv("SMTP_USER", raising=False)
+    monkeypatch.setenv("EMAIL_PASSWORD", "secret")
     result = send_enrollment_email(to="citizen@example.com", full_name="Ada", uin="1111-2222")
     assert result.skipped is True
     assert "incomplete" in result.detail
+
+
+def test_send_without_login_when_password_empty(monkeypatch: pytest.MonkeyPatch):
+    calls = _configure_gmail(monkeypatch)
+    monkeypatch.delenv("EMAIL_PASSWORD", raising=False)
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+
+    result = send_enrollment_email(
+        to="citizen@example.com",
+        full_name="Ada Lovelace",
+        uin="1234-5678-9012",
+    )
+    assert result.sent is True
+    assert result.skipped is False
+    assert "login" not in calls
+    assert calls["starttls"] is True
+    assert calls["ehlo"] == 2
+    assert calls["message"]["To"] == "citizen@example.com"
+
+
+@pytest.mark.parametrize("flag", ["0", "false", "no", "off"])
+def test_send_skips_starttls_when_disabled(monkeypatch: pytest.MonkeyPatch, flag: str):
+    calls = _configure_gmail(monkeypatch)
+    monkeypatch.setenv("SMTP_STARTTLS", flag)
+
+    result = send_enrollment_email(
+        to="citizen@example.com",
+        full_name="Ada Lovelace",
+        uin="1234-5678-9012",
+    )
+    assert result.sent is True
+    assert result.skipped is False
+    assert "starttls" not in calls
+    assert calls["ehlo"] == 1
+    assert calls["login"] == ("sender@example.com", "app-password")
 
 
 def test_send_delivers_via_smtp(monkeypatch: pytest.MonkeyPatch):
@@ -239,7 +275,6 @@ def test_decode_id_card_png_rejects_bad_payloads():
 def test_enroll_bad_id_card_image_still_succeeds(monkeypatch: pytest.MonkeyPatch):
     captured = _capture_enrollment_email(monkeypatch)
     payload = {
-        "uin": "5555-6666-7701",
         "fullName": "Bad Card",
         "email": "bad-card@citizen.asia",
         "faceImage": _data_url(b"mock-face-bytes-bad-card"),
@@ -256,7 +291,6 @@ def test_enroll_bad_id_card_image_still_succeeds(monkeypatch: pytest.MonkeyPatch
     oversized = _PNG_MAGIC + b"\x00" * (2_000_001 - len(_PNG_MAGIC))
     captured.clear()
     oversized_payload = {
-        "uin": "5555-6666-7702",
         "fullName": "Huge Card",
         "email": "huge-card@citizen.asia",
         "faceImage": _data_url(b"mock-face-bytes-huge-card"),
@@ -273,7 +307,6 @@ def test_enroll_bad_id_card_image_still_succeeds(monkeypatch: pytest.MonkeyPatch
 def test_enroll_email_id_card_false_drops_image(monkeypatch: pytest.MonkeyPatch):
     captured = _capture_enrollment_email(monkeypatch)
     payload = {
-        "uin": "5555-6666-7703",
         "fullName": "No Card Mail",
         "email": "no-card@citizen.asia",
         "faceImage": _data_url(b"mock-face-bytes-no-card"),
@@ -285,7 +318,7 @@ def test_enroll_email_id_card_false_drops_image(monkeypatch: pytest.MonkeyPatch)
     assert response.status_code == 200
     assert captured["to"] == "no-card@citizen.asia"
     assert captured["full_name"] == "No Card Mail"
-    assert captured["uin"] == "5555-6666-7703"
+    assert captured["uin"] == response.json()["uin"]
     assert captured["email_id_card"] is False
     assert captured["id_card_png"] is None
 
@@ -320,7 +353,6 @@ def test_enroll_includes_email_result(monkeypatch: pytest.MonkeyPatch):
         lambda **kwargs: EmailResult(sent=True, skipped=False, detail="email sent"),
     )
     payload = {
-        "uin": "5555-6666-7777",
         "fullName": "Mail Citizen",
         "email": "mail@citizen.asia",
         "faceImage": _data_url(b"mock-face-bytes-email"),
@@ -339,7 +371,6 @@ def test_enroll_succeeds_when_email_skipped(monkeypatch: pytest.MonkeyPatch):
         lambda **kwargs: EmailResult(sent=False, skipped=True, detail="email provider unset"),
     )
     payload = {
-        "uin": "5555-6666-8888",
         "fullName": "Skip Citizen",
         "email": "skip@citizen.asia",
         "faceImage": _data_url(b"mock-face-bytes-email-skip"),

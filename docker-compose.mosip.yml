@@ -30,6 +30,8 @@ services:
     image: ${PROJECT_NAME}:dev
     container_name: ${PROJECT_NAME}-idrepo
     command: ["/app/.venv/bin/python3", "-m", "mock.idrepo"]
+    volumes:
+      - ./src/mock:/app/src/mock:ro
     environment:
       PYTHONPATH: "/app/src"
       POSTGRES_HOST: "postgres"
@@ -72,9 +74,11 @@ services:
   app:
     environment:
       MOSIP_IDREPO_BASE_URL: "http://idrepo:8080"
+      MOSIP_AUTHMANAGER_URL: "http://idrepo:8080"
+      MOSIP_IDGENERATOR_BASE_URL: "http://idrepo:8080"
       KEYCLOAK_URL: "http://keycloak:8080"
-      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KEYCLOAK_PUBLIC_URL: "http://localhost:8080/auth"
+      KEYCLOAK_INTERNAL_URL: "http://keycloak:8080"
       KEYCLOAK_REALM: ${KEYCLOAK_REALM}
     depends_on:
       idrepo:

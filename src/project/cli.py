@@ -13,7 +13,12 @@ import logging
 _PROJECT_NAME = os.environ["PROJECT_NAME"]
 
 # adding command
-from mock.cli import cli as mock_cli
+# The runner image deletes src/mock. Import it only when the tree is present
+# (local source, or the Compose bind mount) so uvicorn can start without it.
+try:
+    from mock.cli import cli as mock_cli
+except ModuleNotFoundError:
+    mock_cli = None
 from project.processor import cli as processor_cli
 from project.processor_celery import cli as processor_celery_cli
 from project.web import cli as web_cli
@@ -25,11 +30,12 @@ cli.add_typer(
     name="register_id",
     help="Citizen Registration Gateway: manage citizens, IDRepo & liveness.",
 )
-cli.add_typer(
-    mock_cli,
-    name="mock",
-    help="MOSIP Substrate Mock Services (IDRepo, etc.).",
-)
+if mock_cli is not None:
+    cli.add_typer(
+        mock_cli,
+        name="mock",
+        help="MOSIP Substrate Mock Services (IDRepo, etc.).",
+    )
 cli.add_typer(processor_cli, 
               name="processor",
               help="The processor module (demo/tutorial).")

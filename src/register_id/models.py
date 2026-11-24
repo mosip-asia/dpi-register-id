@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from register_id.consent import ConsentRecord, validate_consent
 
+ReasonText = Annotated[str, Field(min_length=3, max_length=200)]
+
 
 class LivenessChallenge(BaseModel):
     challengeId: str = Field(..., description="Unique nonce identifier for this liveness session")
@@ -126,9 +128,20 @@ class ClientLiveness(BaseModel):
 class EnrollRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    uin: str = Field(..., min_length=4, max_length=32, description="MOSIP Unique Identification Number")
     fullName: str = Field(..., min_length=1, max_length=128, description="Citizen full legal name")
     email: str = Field(..., max_length=128, description="Citizen email address")
+    gender: str = Field(default="Female", min_length=1, max_length=40)
+    dateOfBirth: str = Field(default="1990-01-01", min_length=10, max_length=10)
+    phone: str = Field(default="", max_length=32)
+    addressLine1: str = Field(default="", max_length=128)
+    addressLine2: str = Field(default="", max_length=128)
+    addressLine3: str = Field(default="", max_length=128)
+    region: str = Field(default="", max_length=64)
+    province: str = Field(default="", max_length=64)
+    city: str = Field(default="", max_length=64)
+    zone: str = Field(default="", max_length=32)
+    postalCode: str = Field(default="", max_length=16)
+    referenceIdentityNumber: str = Field(default="", max_length=64)
     emailIdCard: bool = False
     # Browser-drawn card (name, date of birth, UIN, QR). Not stored or logged.
     idCardImage: str | None = Field(default=None, repr=False)
@@ -138,8 +151,17 @@ class EnrollRequest(BaseModel):
     liveness: ClientLiveness | None = None
     consent: ConsentRecord
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_client_uin(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("uin"):
+            raise ValueError("The server allocates the UIN")
+        return data
+
     @model_validator(mode="after")
     def _validate_face_views(self) -> "EnrollRequest":
+        if len(self.dateOfBirth) != 10 or self.dateOfBirth[4] not in "-/" or self.dateOfBirth[7] not in "-/":
+            raise ValueError("dateOfBirth must be yyyy-MM-dd")
         validate_face_views(self.faceViews)
         if (self.faceDescriptors is None) != (self.liveness is None):
             raise ValueError("faceDescriptors and liveness must be sent together")
@@ -191,6 +213,7 @@ class CredentialRequest(BaseModel):
 
     uin: str = Field(..., min_length=4, description="Enrolled citizen UIN")
     password: str = Field(..., min_length=8, description="Password chosen by the citizen")
+    credentialTicket: str = Field(..., min_length=8, description="Single-use ticket from the enrolment that allocated this UIN")
 
 
 class CredentialResponse(BaseModel):
@@ -215,6 +238,8 @@ class AuthResponse(BaseModel):
     yawSource: str | None = None
     compared: bool = False
     livenessSource: str | None = None
+    activityToken: str | None = None
+    checkId: str | None = None
 
 
 class DemographicsUpdate(BaseModel):
@@ -222,12 +247,74 @@ class DemographicsUpdate(BaseModel):
 
     fullName: str = Field(..., min_length=1, max_length=128)
     email: str | None = Field(default=None, max_length=128)
+    reason: ReasonText
 
 
 class LoginDisabledUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     disabled: bool
+    reason: ReasonText
+
+
+class ReasonBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: ReasonText
+
+
+class StaffCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=200)
+    email: str = Field(..., min_length=1, max_length=254)
+    role: Literal["officer", "admin"]
+    reason: ReasonText
+
+
+class StaffRoleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["officer", "admin"]
+    reason: ReasonText
+
+
+class CaptureAttempt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["enroll", "camera"]
+    reasonCode: Literal[
+        "enroll_failed",
+        "camera_unavailable",
+        "camera_quality",
+        "CAM-1",
+        "CAM-2",
+        "CAM-3",
+        "CAM-4",
+        "CAM-5",
+        "FACE-1",
+        "FACE-2",
+        "FACE-3",
+        "IMG-1",
+        "PAD-1",
+        "PAD-2",
+        "SESSION-1",
+        "SESSION-2",
+    ]
+    detail: str = Field(default="", max_length=200)
+
+
+class CitizenLock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    locked: bool
+    reason: ReasonText
+
+
+class NotMeReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    detail: str | None = Field(default=None, max_length=200)
 
 
 class CitizenSummary(BaseModel):
@@ -235,3 +322,4 @@ class CitizenSummary(BaseModel):
     fullName: str
     email: str | None = None
     createdAt: str | None = None
+    loginDisabled: bool | None = None

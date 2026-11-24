@@ -23,7 +23,6 @@ def _consent(**overrides) -> dict:
 
 def _enroll_kwargs(**overrides) -> dict:
     payload = {
-        "uin": "12345678",
         "fullName": "Consent Citizen",
         "email": "consent@citizen.asia",
         "faceImage": "data:image/jpeg;base64,abcd",
@@ -117,7 +116,6 @@ def test_refused_or_missing_consent_stores_no_face():
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": refused_uin,
             "fullName": "Refused Citizen",
             "email": "refused@citizen.asia",
             "faceImage": face,
@@ -128,7 +126,6 @@ def test_refused_or_missing_consent_stores_no_face():
         "/api/enroll",
         headers=enroll_headers(),
         json={
-            "uin": missing_uin,
             "fullName": "Missing Consent",
             "email": "missing@citizen.asia",
             "faceImage": face,

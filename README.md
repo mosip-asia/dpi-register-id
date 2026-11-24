@@ -3,7 +3,7 @@
 # 🪪 register-id
 
 **DPI Citizen Registration Gateway & Zero-Hardware Onboarding Portal**  
-*Part of the MOSIP Asia Digital Public Infrastructure (DPI) Suite — Agency A: National Identity Authority (`register.id.<domain>`)*
+*Part of the MOSIP Asia Digital Public Infrastructure (DPI) Suite — Agency A: National Identity Authority (`register.<domain>`)*
 
 [![CI & Docker Build](https://github.com/mosip-asia/dpi-register-id/actions/workflows/ci.yml/badge.svg)](https://github.com/mosip-asia/dpi-register-id/actions/workflows/ci.yml)
 [![Deployment](https://github.com/mosip-asia/dpi-register-id/actions/workflows/cd.yml/badge.svg)](https://github.com/mosip-asia/dpi-register-id/actions/workflows/cd.yml)
@@ -21,7 +21,7 @@
 
 ## 📌 Overview & Architectural Context
 
-`register-id` serves as the **Citizen Registration Gateway** (`https://register.id.<domain>`) in the MOSIP Asia Digital Public Infrastructure (DPI) architecture. It enables remote, zero-hardware citizen enrollment directly from standard web browsers.
+`register-id` serves as the **Citizen Registration Gateway** (`https://register.<domain>`) in the MOSIP Asia Digital Public Infrastructure (DPI) architecture. It enables remote, zero-hardware citizen enrollment directly from standard web browsers. The Sandbox Kit routes one label under the environment domain, so the host is `register.<domain>`.
 
 ### The Problem
 Upstream MOSIP traditionally requires citizens to enroll in person at physical registration centers using an 800 MB Java desktop application (`mosip/registration-client`) connected to proprietary L0/L1 SBI USB biometric scanners ($500+ each) and processed through 17 batch packet decryption pods (`regproc-*`).
@@ -33,16 +33,15 @@ Upstream MOSIP traditionally requires citizens to enroll in person at physical r
 flowchart TD
     Citizen["👤 Citizen / Student<br/>(Standard Webcam & Browser)"] -->|"1. Live Webcam Capture"| Viewfinder["Browser Viewfinder (HTML5)<br/>Blink Liveness PAD (ISO 30107-3)"]
     Viewfinder -->|"2. Validated JPEG Frame"| Gateway["register-id Backend<br/>(FastAPI / Django)"]
-    Gateway -->|"3. Package Biometric Data"| CBEFF["ISO 19794-5 (FAC) Serializer<br/>inside ISO 19785-3 CBEFF XML"]
+    Gateway -->|"3. CBEFF only if face-api passes policy"| CBEFF["ISO 19794-5 (FAC) Serializer<br/>inside ISO 19785-3 CBEFF XML"]
     Gateway -->|"4. POST /idrepository/v1/identity"| IDRepo["MOSIP IDRepo (Allocates UIN)"]
-    Gateway -->|"5. Provision Account with UIN"| Keycloak["Keycloak IAM (mosip realm)"]
-    IDRepo & Keycloak -->|"6. Citizen Ready for Auth"| eSignet["eSignet OIDC & Inji Wallet Issuance"]
+    Gateway -->|"5. Separate credential call"| Keycloak["Keycloak IAM (mosip realm)"]
 ```
 
 ### Key Architectural Principles
 * **Zero Hardware Barrier:** Works in any modern HTML5/WebRTC-compliant browser without proprietary fingerprint/iris/face capture hardware.
 * **ISO 30107-3 Liveness (PAD):** Client-side presentation attack detection (active blink and motion challenge) to reject static photo, video replay, and deepfake injections.
-* **ISO 19794-5 CBEFF Format:** Encapsulates facial biometric records in standard ISO/IEC 19794-5 (`FAC\0` binary payload) within an ISO 19785-3 CBEFF XML envelope, ensuring 100% upstream interoperability with MOSIP `id-repository`, `id-authentication` (IDA), and the AI-BioSDK matcher.
+* **ISO 19794-5 CBEFF Format:** CBEFF is sent only when the face-api path passes the biometric policy. A hash-only enrol is a draft and does not send CBEFF. When it is sent, the document encapsulates facial biometric records in standard ISO/IEC 19794-5 (`FAC\0` binary payload) within an ISO 19785-3 CBEFF XML envelope, ensuring 100% upstream interoperability with MOSIP `id-repository`, `id-authentication` (IDA), and the AI-BioSDK matcher.
 * **Direct Substrate Seeding:** Directly interfaces with MOSIP IDRepo (`POST /idrepository/v1/identity`) using internal Keycloak service tokens (`mosip-idrepo-client`), bypassing heavy batch packet pipelines while maintaining exact schema parity.
 
 ---
@@ -53,6 +52,7 @@ flowchart TD
    - **`dev` (Default)**: Daily development and feature branches fork/merge here. Pushes do not auto-deploy.
    - **`stg`**: Staging branch. Promoted via PR from `dev` (`bash scripts/release.sh pr stg`). Merging triggers automated deployment to `staging`.
    - **`main`**: Production branch. Promoted via PR from `stg` (`bash scripts/release.sh pr main`). Merging triggers automated deployment to `production`.
+   - Docker Compose is for local development. Staging and production are the Helm chart in [`helm/register-id`](helm/register-id). The Sandbox Kit owns ingress.
 2. **Release & GHCR**: Releases are cut from `dev` using `bash scripts/release.sh vX.Y.Z`. Pushing the tag triggers CI tests and builds/pushes Docker images to GitHub Container Registry (`ghcr.io/mosip-asia/dpi-register-id`).
 3. **Configuration**: Strictly one [`.env.example`](.env.example) template. Local setup is `cp .env.example .env`.
 4. **Data Hygiene**: Never commit spreadsheets, database dumps, credentials, or raw PII. Enforced locally and in CI via `bash scripts/check-data-guard.sh`.
@@ -72,6 +72,9 @@ uv sync
 *(VS Code Dev Containers are also supported via `.devcontainer/`)*.
 
 ### 2. Run with Docker Compose (Full Stack)
+
+Docker Compose is for local development. Staging and production are the Helm chart in [`helm/register-id`](helm/register-id). The Sandbox Kit owns ingress.
+
 ```bash
 # Build local runner image and spin up complete stack
 docker compose up -d --build
@@ -123,7 +126,7 @@ Technical details, architecture specifications, and implementation schedules are
 - **[Objectives & Weekly Milestones](docs/objectives-and-milestones.md)**: Implementation goals, system architecture, RACI matrix, and 8-week delivery milestones (Weeks 1–8).
 - **[Business Requirements](docs/business-requirements.pdf)**: Accessibility, security, modularity, and standardization, plus the enroll and 1:1 walkthrough of the [current system diagram](docs/diagrams/current-system.pdf). Source: [`docs/business-requirements.tex`](docs/business-requirements.tex).
 - **[Citizen Portal Technology](docs/tech-stack.pdf)**: Vite, React, TanStack Router, pnpm, and the branding kit, and which business requirement each part of the portal carries. Source: [`docs/tech-stack.tex`](docs/tech-stack.tex).
-- **[CI/CD & Deployment Guide](docs/deployment.md)**: Multi-environment deployment pipeline (`cd.yml`), NetBird VPN mesh, Traefik reverse proxy overlay, and automated rollbacks.
+- **[CI/CD & Deployment Guide](docs/deployment.md)**: Local Docker Compose, optional Traefik overlay, and the Helm chart for staging and production. The Sandbox Kit owns ingress.
 - **[AI Agent Invariants (`AGENTS.md`)](AGENTS.md)**: Operational invariants and architectural guidelines for AI coding assistants.
 
 ### 🎓 Starter Foundation Tutorials (`docs/tutorial/`)
@@ -142,7 +145,7 @@ Technical details, architecture specifications, and implementation schedules are
 ├── data/                        # Local data directory (ignored by git)
 ├── docs/                        # Architecture, roadmap & deployment documentation
 │   ├── objectives-and-milestones.md # Core specification & 8-week delivery plan
-│   ├── deployment.md            # CD pipeline, NetBird VPN, Traefik ingress
+│   ├── deployment.md            # Local Compose, optional Traefik overlay, Helm for staging and production
 │   └── tutorial/                # Foundation tutorials (FastAPI, Celery, Django)
 ├── logs/                        # Application logs (ignored by git)
 ├── models/                      # Model checkpoints and weights (ignored by git)
@@ -161,7 +164,8 @@ Technical details, architecture specifications, and implementation schedules are
 ├── django_manage.py             # Django entrypoint script
 ├── docker-compose.yml           # Base compose stack (App + Redis)
 ├── docker-compose.mosip.yml     # MOSIP local overlay (IDRepo REST Service + PostgreSQL + Keycloak IAM)
-├── docker-compose.traefik.yml   # Traefik overlay for deployed environments
+├── helm/register-id/            # Staging and production Helm chart (Kit owns ingress)
+├── docker-compose.traefik.yml   # Optional local Traefik overlay
 ├── Dockerfile                   # Multi-stage production container build
 ├── pyproject.toml               # Project dependencies and packaging (register-id)
 └── README.md

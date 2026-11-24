@@ -176,9 +176,21 @@ def get_enroll_limiter() -> EnrollLimiter:
     return limiter
 
 
+def enroll_success_limit() -> int:
+    """Successful writes allowed for one ticket or client during the window."""
+    raw = os.getenv("ENROLL_SUCCESS_LIMIT", "").strip()
+    if not raw:
+        return ENROLL_SUCCESS_LIMIT
+    try:
+        value = int(raw)
+    except ValueError:
+        return ENROLL_SUCCESS_LIMIT
+    return min(max(value, 1), 10000)
+
+
 def ensure_enroll_allowed(token: str, now: float | None = None) -> None:
-    """Raise when this token is already at ENROLL_SUCCESS_LIMIT in the window."""
-    if get_enroll_limiter().writes_in_window(token, now) >= ENROLL_SUCCESS_LIMIT:
+    """Raise when this subject is already at the configured cap in the window."""
+    if get_enroll_limiter().writes_in_window(token, now) >= enroll_success_limit():
         raise EnrollLimitExceeded()
 
 

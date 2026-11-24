@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "register-id.fullname" . }}
+  labels:
+    {{- include "register-id.labels" . | nindent 4 }}
+  {{- $publicHost := include "register-id.host" . | trim }}
+  {{- if $publicHost }}
+  annotations:
+    register-id.mosip.io/host: {{ $publicHost | quote }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "register-id.selectorLabels" . | nindent 4 }}

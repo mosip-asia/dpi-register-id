@@ -8,19 +8,61 @@ so it never writes attributes.individualBiometrics.
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import requests
 
+from register_id.idrepo_client import (
+    _http_attempts,
+    _http_backoff,
+    _http_timeout,
+    inprocess_fallback_enabled,
+)
+
 logger = logging.getLogger(__name__)
 
-KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://localhost:8080/auth").rstrip("/")
-KEYCLOAK_ADMIN_USER = os.getenv("KEYCLOAK_ADMIN_USER", "admin")
-# Compose supplies this from .env. An empty value fails closed; there is no
-# built-in admin password and no default citizen password.
-KEYCLOAK_ADMIN_PASSWORD = os.getenv("KEYCLOAK_ADMIN_PASSWORD", "")
+def _configured(name: str, default: str) -> str:
+    """Blank environment values keep the local default. Compose passes empty strings."""
+    value = os.getenv(name, "").strip()
+    return (value or default).rstrip("/")
+
+
+KEYCLOAK_URL = _configured("KEYCLOAK_URL", "http://localhost:8080/auth")
+# Browser redirects use the public host. Admin API calls use the in-cluster host.
+# KEYCLOAK_URL fills a missing host only while local in-process fallback is on.
+
+
+def _scoped_keycloak_url(name: str) -> str:
+    specific = _configured(name, "")
+    if specific:
+        return specific
+    if inprocess_fallback_enabled():
+        return KEYCLOAK_URL
+    return ""
+
+
+KEYCLOAK_PUBLIC_URL = _scoped_keycloak_url("KEYCLOAK_PUBLIC_URL")
+KEYCLOAK_INTERNAL_URL = _scoped_keycloak_url("KEYCLOAK_INTERNAL_URL")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "mosip")
+
+
+def _keycloak_call(method: str, url: str, *, idempotent: bool = False, **kwargs):
+    """POST and PUT run once. Idempotent GETs use the shared MOSIP retry budget."""
+    attempts = _http_attempts(idempotent)
+    delay = _http_backoff()
+    kwargs["timeout"] = _http_timeout()
+    call = getattr(requests, method)
+    for attempt in range(attempts):
+        try:
+            return call(url, **kwargs)
+        except requests.RequestException:
+            if attempt + 1 >= attempts:
+                raise
+            if delay:
+                time.sleep(delay)
+                delay = min(delay * 2, 5.0)
 
 
 @dataclass
@@ -34,8 +76,9 @@ class ProvisionResult(int):
     ok: bool
     created: bool
     detail: str
+    retryable: bool = False
 
-    def __new__(cls, ok: bool, created: bool, detail: str):
+    def __new__(cls, ok: bool, created: bool, detail: str, retryable: bool = False):
         return int.__new__(cls, 1 if ok else 0)
 
     def __bool__(self) -> bool:
@@ -49,55 +92,69 @@ class KeycloakBridgeClient:
 
     def __init__(
         self,
-        base_url: str = KEYCLOAK_URL,
-        admin_user: str = KEYCLOAK_ADMIN_USER,
-        admin_pass: str = KEYCLOAK_ADMIN_PASSWORD,
+        base_url: str = KEYCLOAK_INTERNAL_URL,
+        admin_user: str = "",
+        admin_pass: str = "",
         realm: str = KEYCLOAK_REALM,
+        client_id: str = "",
+        client_secret: str = "",
     ):
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.admin_user = admin_user
         self.admin_pass = admin_pass
         self.realm = realm
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._token_unreachable = False
 
     def get_admin_token(self) -> str | None:
         """
-        Requests a master-realm admin token with the password grant.
+        Token for the Keycloak admin API.
 
-        The token and the admin password are never logged.
+        Only a confidential client on KEYCLOAK_REALM is accepted. The master
+        password grant is not used. The token and the secret are never logged.
+        The client needs realm-management manage-users and view-users, and the
+        secret is supplied per deployment.
         """
-        if not self.base_url or not self.admin_user or not self.admin_pass:
-            logger.warning("Keycloak admin token unavailable: configuration incomplete.")
+        if not (self.client_id and self.client_secret):
+            self._token_unreachable = False
+            logger.warning("Keycloak service-account token unavailable: configuration incomplete.")
             return None
+        return self._client_credentials_token()
 
-        token_url = f"{self.base_url}/realms/master/protocol/openid-connect/token"
+    def _client_credentials_token(self) -> str | None:
+        """Confidential-client token on the application realm, not master admin-cli."""
+        if not self.base_url or not self.realm:
+            logger.warning("Keycloak service-account token unavailable: configuration incomplete.")
+            return None
+        token_url = f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/token"
+        self._token_unreachable = False
         try:
-            res = requests.post(
+            res = _keycloak_call(
+                "post",
                 token_url,
+                idempotent=False,
                 data={
-                    "client_id": "admin-cli",
-                    "username": self.admin_user,
-                    "password": self.admin_pass,
-                    "grant_type": "password",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "grant_type": "client_credentials",
                 },
-                timeout=3,
             )
         except requests.RequestException:
+            self._token_unreachable = True
             logger.warning("Keycloak server unreachable at %s", token_url)
             return None
-
         if res.status_code != 200:
-            logger.warning("Keycloak admin token failed with status %s", res.status_code)
+            logger.warning("Keycloak service-account token failed with status %s", res.status_code)
             return None
-
         try:
             body = res.json()
         except ValueError:
-            logger.warning("Keycloak admin token response was not JSON.")
+            logger.warning("Keycloak service-account token response was not JSON.")
             return None
-
         token = body.get("access_token") if isinstance(body, dict) else None
         if not token:
-            logger.warning("Keycloak admin token response did not include an access token.")
+            logger.warning("Keycloak service-account token response did not include an access token.")
             return None
         return str(token)
 
@@ -109,7 +166,8 @@ class KeycloakBridgeClient:
         password: str,
     ) -> ProvisionResult:
         """
-        Creates a citizen user, or resets the password when the same UIN already exists.
+        Creates a citizen user. A Keycloak 409 means that account already exists.
+        The password is not reset.
 
         password is the credential the citizen chose. There is no default.
         It is sent only in a Keycloak credential payload and is never logged.
@@ -119,96 +177,40 @@ class KeycloakBridgeClient:
 
         admin_token = self.get_admin_token()
         if not admin_token:
-            return ProvisionResult(False, False, "admin token unavailable")
+            return ProvisionResult(
+                False,
+                False,
+                "admin token unavailable",
+                retryable=self._token_unreachable,
+            )
 
-        username = email.split("@")[0] if "@" in email else uin.replace("-", "")
+        username = uin
         payload = _user_payload(uin, full_name, email, username, password)
         users_url = f"{self.base_url}/admin/realms/{self.realm}/users"
         headers = _auth_headers(admin_token)
 
         try:
-            res = requests.post(users_url, json=payload, headers=headers, timeout=5)
+            res = _keycloak_call(
+                "post",
+                users_url,
+                idempotent=False,
+                json=payload,
+                headers=headers,
+            )
         except requests.RequestException:
             logger.error("Keycloak user creation request failed")
-            return ProvisionResult(False, False, "network error")
+            return ProvisionResult(False, False, "network error", retryable=True)
 
         if res.status_code == 201:
             logger.info("Citizen %s created in Keycloak realm %s", uin, self.realm)
             return ProvisionResult(True, True, "created")
 
         if res.status_code == 409:
-            return self._reset_password_if_same_uin(
-                users_url=users_url,
-                headers=headers,
-                username=username,
-                uin=uin,
-                password=password,
-            )
+            logger.info("Citizen %s already exists in Keycloak realm %s", uin, self.realm)
+            return ProvisionResult(False, False, "account already exists")
 
         logger.warning("Keycloak user creation returned status %s", res.status_code)
         return ProvisionResult(False, False, f"keycloak status {res.status_code}")
-
-    def _reset_password_if_same_uin(
-        self,
-        users_url: str,
-        headers: dict[str, str],
-        username: str,
-        uin: str,
-        password: str,
-    ) -> ProvisionResult:
-        try:
-            res = requests.get(
-                users_url,
-                params={"username": username, "exact": "true"},
-                headers=headers,
-                timeout=5,
-            )
-        except requests.RequestException:
-            logger.error("Keycloak user lookup request failed")
-            return ProvisionResult(False, False, "network error")
-
-        if res.status_code != 200:
-            logger.warning("Keycloak user lookup returned status %s", res.status_code)
-            return ProvisionResult(False, False, "user lookup failed")
-
-        try:
-            body = res.json()
-        except ValueError:
-            logger.warning("Keycloak user lookup response was not JSON.")
-            return ProvisionResult(False, False, "user lookup failed")
-
-        user = _exact_user(body, username)
-        if user is None:
-            return ProvisionResult(False, False, "existing user not found")
-
-        uin_state = _uin_state(user, uin)
-        if uin_state == "missing":
-            return ProvisionResult(False, False, "existing user uin missing")
-        if uin_state != "match":
-            return ProvisionResult(False, False, "existing user uin mismatch")
-
-        user_id = user.get("id")
-        if not user_id:
-            return ProvisionResult(False, False, "existing user id missing")
-
-        reset_url = f"{users_url}/{user_id}/reset-password"
-        try:
-            reset = requests.put(
-                reset_url,
-                json={"type": "password", "value": password, "temporary": False},
-                headers=headers,
-                timeout=5,
-            )
-        except requests.RequestException:
-            logger.error("Keycloak password reset request failed")
-            return ProvisionResult(False, False, "network error")
-
-        if reset.status_code in (200, 204):
-            logger.info("Citizen %s password set in Keycloak realm %s", uin, self.realm)
-            return ProvisionResult(True, False, "password reset")
-
-        logger.warning("Keycloak password reset returned status %s", reset.status_code)
-        return ProvisionResult(False, False, "password reset failed")
 
     def set_login_enabled(self, uin: str, email: str, enabled: bool) -> ProvisionResult:
         """
@@ -227,11 +229,12 @@ class KeycloakBridgeClient:
         users_url = f"{self.base_url}/admin/realms/{self.realm}/users"
         headers = _auth_headers(admin_token)
         try:
-            res = requests.get(
+            res = _keycloak_call(
+                "get",
                 users_url,
+                idempotent=True,
                 params={"q": f"uin:{uin}"},
                 headers=headers,
-                timeout=5,
             )
         except requests.RequestException:
             logger.error("Keycloak user lookup request failed")
@@ -262,11 +265,12 @@ class KeycloakBridgeClient:
         payload = {key: value for key, value in user.items() if key != "credentials"}
         payload["enabled"] = enabled
         try:
-            updated = requests.put(
+            updated = _keycloak_call(
+                "put",
                 f"{users_url}/{user_id}",
+                idempotent=False,
                 json=payload,
                 headers=headers,
-                timeout=5,
             )
         except requests.RequestException:
             logger.error("Keycloak enabled update failed")
@@ -349,5 +353,8 @@ _keycloak_client: KeycloakBridgeClient | None = None
 def get_keycloak_client() -> KeycloakBridgeClient:
     global _keycloak_client
     if _keycloak_client is None:
-        _keycloak_client = KeycloakBridgeClient()
+        _keycloak_client = KeycloakBridgeClient(
+            client_id=os.getenv("KEYCLOAK_ADMIN_CLIENT_ID", ""),
+            client_secret=os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+        )
     return _keycloak_client

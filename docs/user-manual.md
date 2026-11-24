@@ -26,7 +26,7 @@ This proof-of-concept proves that a citizen can be securely proofed and register
 │  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
 │  │ register-id APPLICATION GATEWAY (FastAPI / Django Core)                          │  │
 │  │ • Normalizes Face Image & Extracts 128-D Biometric Descriptor                    │  │
-│  │ • Serializes ISO/IEC 19794-5 (FAC\0) Record inside ISO 19785-3 CBEFF XML         │  │
+│  │ • CBEFF only when face-api passes policy; hash-only enrol is a draft             │  │
 │  └───────┬──────────────────────────────────────────────────────────┬───────────────┘  │
 │          │                                                          │                  │
 │          ▼ POST /idrepository/v1/identity                           ▼ Admin REST API   │
@@ -35,13 +35,13 @@ This proof-of-concept proves that a citizen can be securely proofed and register
 │  │ (mock.idrepo / Official API) │                         │ (mosip realm)           │  │
 │  │ • Allocates Sovereign UIN    │                         │ • Provisions Citizen    │  │
 │  │ • Persists Demographics      │                         │ • Sets uin Attribute    │  │
-│  │ • Stores CBEFF Biometrics    │                         │ • Grants Bio Claim      │  │
+│  │ • CBEFF on face-api pass only│                         │ • Grants Bio Claim      │  │
 │  └──────────────┬───────────────┘                         └────────────┬────────────┘  │
 │                 │                                                      │               │
 │                 ▼                                                      ▼               │
 │  ┌──────────────────────────────┐                         ┌─────────────────────────┐  │
-│  │ PostgreSQL 15 Database       │                         │ eSignet OIDC / Wallet   │  │
-│  │ Schema: mosip_idrepo         │                         │ (login.id.<domain>)     │  │
+│  │ PostgreSQL 15 Database       │                         │ Credential call only    │  │
+│  │ Schema: mosip_idrepo         │                         │ (not eSignet or Inji)   │  │
 │  └──────────────────────────────┘                         └─────────────────────────┘  │
 │                                                                                        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
@@ -50,9 +50,9 @@ This proof-of-concept proves that a citizen can be securely proofed and register
 ### Key Technical Capabilities Demonstrated:
 1. **Zero Proprietary Hardware:** Runs in standard HTML5/WebRTC browsers without dedicated USB fingerprint or iris devices.
 2. **ISO/IEC 30107-3 Liveness (PAD):** Real-time Eye Aspect Ratio (EAR) micro-motion tracking prevents spoofing with static photos or printed paper.
-3. **ISO 19794-5 & ISO 19785-3 CBEFF Serialization:** Packages biometrics in standard binary face records wrapped in XML containers with MOSIP Format Owner `257` and Format Type `8`.
+3. **ISO 19794-5 & ISO 19785-3 CBEFF Serialization:** CBEFF is sent only when the face-api path passes the biometric policy. A hash-only enrol is a draft and does not send CBEFF. When it is sent, the document packages a binary face record in an XML container with MOSIP Format Owner `257` and Format Type `8`.
 4. **Decoupled IDRepo REST Interface:** The gateway never touches the SQL database directly; all identity operations strictly use the official MOSIP IDRepo REST contract (`/idrepository/v1/identity`).
-5. **Keycloak eSignet IAM Sync:** Instantly provisions the citizen in the `mosip` realm so they can log in via eSignet on Resident and Health portals.
+5. **Separate credential call:** Enrolment stops at IDRepo. A later call provisions the citizen in the `mosip` realm. This path does not call eSignet or Inji.
 6. **1:1 Facial Verification:** Compares live probe embeddings against stored gallery records using Euclidean distance thresholding ($T < 0.50$).
 
 ---
@@ -90,7 +90,7 @@ Run `docker compose ps` to ensure all 5 services are active:
 |---|---|---|---|
 | **Web Gateway** | `register-id-app` | `http://localhost:8000` | Citizen Registration UI & REST API |
 | **MOSIP IDRepo** | `register-id-idrepo` | `http://localhost:8081` | MOSIP Identity Repository REST Interface |
-| **Keycloak IAM** | `register-id-keycloak` | `http://localhost:8080` | MOSIP Realm & eSignet Identity Provider |
+| **Keycloak IAM** | `register-id-keycloak` | `http://localhost:8080` | Separate credential call in the mosip realm |
 | **PostgreSQL** | `register-id-postgres` | `localhost:5432` | Master Database (`mosip_idrepo` schema) |
 | **Redis** | `register-id-redis` | `localhost:6379` | Background task cache & Celery queue |
 
@@ -146,8 +146,8 @@ You will see the **Citizen Identity Enrollment** panel:
 The browser outputs a success card:
 * **UIN Registered:** `4368891129`
 * **Backend Used:** `mosip-idrepo-rest` (routed via `POST http://idrepo:8080/idrepository/v1/identity/`)
-* **ISO 19794-5 CBEFF Generated:** `true` (standard biometric envelope packaged)
-* **Keycloak User Provisioned:** `true` (ready for eSignet OIDC login)
+* **ISO 19794-5 CBEFF Generated:** `false` on this hash-only enrol, which stays a draft and does not send CBEFF. CBEFF is sent only when the face-api path passes the biometric policy.
+* **Credential call:** separate from enrolment. Enrolment stops at IDRepo and does not call eSignet or Inji.
 
 ---
 
@@ -219,8 +219,10 @@ uv run register-id register_id show 4368891129
 Citizen Details (4368891129)
   Full Name: Somchai Jaidee
   Email:     somchai@dopa.gov.th
-  CBEFF XML: Present
+  CBEFF XML: None
 ```
+
+This lab enrol is hash-only, so the CLI prints `None`. CBEFF is sent only when the face-api path passes the biometric policy. A hash-only enrol is a draft and does not send CBEFF.
 
 ### 6.4 Inspect Keycloak IAM Admin Console
 1. Open **`http://localhost:8080`** in your browser.

@@ -1,4 +1,6 @@
+import json
 import logging
+from pathlib import Path
 
 import base64
 
@@ -53,6 +55,7 @@ def test_idrepo_client_crud_flow():
         templates=templates,
     )
     assert success is True
+    assert client.last_backend == "inprocess-idrepo"
 
     identity = client.get_identity(uin, include_biometrics=True)
     assert identity is not None
@@ -113,6 +116,8 @@ def test_add_identity_fails_without_inprocess_fallback_when_remote_is_down():
         face_image="data:image/jpeg;base64,bW9jay1mYWNl",
     )
     assert saved is False
+    assert client.last_backend is None
+    assert client.last_status == 503
     assert client.last_error
     assert "127.0.0.1:9" in client.last_error
     missing = mock_client.get(f"/idrepository/v1/identity/uin/{uin}")
@@ -190,6 +195,79 @@ def test_identity_post_does_not_persist_client_vectors():
     ).status_code == 404
 
 
+def test_posted_identity_fields_round_trip():
+    required = json.loads(
+        (Path(__file__).parent / "fixtures" / "identity-required.json").read_text(encoding="utf-8")
+    )
+    client = IDRepoClient(base_url="http://127.0.0.1:9", enable_inprocess_fallback=True)
+    uin = client.generate_uin()
+    face = "data:image/jpeg;base64,bW9jay1mYWNl"
+    cbeff_xml = build_cbeff_xml(uin=uin, jpeg_bytes=b"kit-face")
+    assert client.add_identity(
+        uin=uin,
+        full_name="Ada Lovelace",
+        date_of_birth="1990-12-10",
+        gender="Female",
+        email="ada@example.com",
+        phone="0812345678",
+        address_line1="1 Register Road",
+        address_line2="Floor 2",
+        address_line3="Room 3",
+        region="Bangkok",
+        province="Bangkok",
+        city="Pathum Wan",
+        zone="1",
+        postal_code="10330",
+        reference_identity_number="REF-1",
+        face_image=face,
+        cbeff_xml=cbeff_xml,
+        templates=[{"sector": "front", "embedding": [0.2, 0.3]}],
+    ) is True
+
+    plain = mock_client.get(f"/idrepository/v1/identity/uin/{uin}")
+    assert plain.status_code == 200
+    body = plain.json()["response"]["identity"]
+    names = set(required)
+    assert [key for key in body if key in names] == required
+    assert body["IDSchemaVersion"] == 1.1
+    assert body["dateOfBirth"] == "1990/12/10"
+    assert body["gender"] == [{"language": "eng", "value": "Female"}]
+    assert body["phone"] == "0812345678"
+    assert body["addressLine1"] == [{"language": "eng", "value": "1 Register Road"}]
+    assert body["addressLine2"] == [{"language": "eng", "value": "Floor 2"}]
+    assert body["postalCode"] == "10330"
+    assert body["referenceIdentityNumber"] == "REF-1"
+    assert "faceImage" not in body
+    assert plain.json()["response"]["documents"] == []
+
+    explicit = mock_client.get(
+        f"/idrepository/v1/identity/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    )
+    explicit_body = explicit.json()["response"]
+    assert explicit_body["identity"]["faceImage"] == face
+    assert explicit_body["identity"]["dateOfBirth"] == "1990/12/10"
+    assert "<BIR" in base64.urlsafe_b64decode(
+        explicit_body["documents"][0]["value"] + "=" * (-len(explicit_body["documents"][0]["value"]) % 4)
+    ).decode()
+    templates = mock_client.get(
+        f"/ida/v1/face-template/uin/{uin}",
+        params={"includeBiometrics": "true"},
+    )
+    assert templates.status_code == 200
+    assert templates.json()["templates"][0]["sector"] == "front"
+
+    assert client.update_demographics(uin, "Ada Byron", "ada.byron@example.com") is True
+    corrected = mock_client.get(f"/idrepository/v1/identity/uin/{uin}").json()["response"]["identity"]
+    assert corrected["fullName"] == [{"language": "eng", "value": "Ada Byron"}]
+    assert corrected["email"] == "ada.byron@example.com"
+    assert corrected["gender"] == body["gender"]
+    assert corrected["dateOfBirth"] == "1990/12/10"
+    assert corrected["phone"] == "0812345678"
+    assert corrected["addressLine1"] == body["addressLine1"]
+    assert "faceImage" not in corrected
+
+
 class _EnrollResponse:
     def __init__(self, status_code, body):
         self.status_code = status_code
@@ -216,6 +294,13 @@ def _enroll_against(monkeypatch, response):
         face_image="data:image/jpeg;base64,bW9jay1mYWNl",
     )
     return client, saved
+
+
+def test_remote_enroll_success_is_labeled_mosip_idrepo_rest(monkeypatch):
+    response = _EnrollResponse(200, {"response": {"uin": "9000000503"}})
+    client, saved = _enroll_against(monkeypatch, response)
+    assert saved is True
+    assert client.last_backend == "mosip-idrepo-rest"
 
 
 def test_enroll_failure_log_keeps_status_and_code_only(monkeypatch, caplog):
@@ -250,3 +335,93 @@ def test_enroll_failure_log_drops_non_json_body(monkeypatch, caplog):
     assert client.last_error == "MOSIP IDRepo returned HTTP 502"
     assert leaked not in (client.last_error or "")
     assert leaked not in caplog.text
+
+
+def test_remote_read_sends_authmanager_cookie(monkeypatch):
+    secret = "mosip-secret-do-not-log"
+    monkeypatch.setenv("MOSIP_AUTHMANAGER_URL", "http://auth.test")
+    monkeypatch.setenv("MOSIP_CLIENT_ID", "register-id")
+    monkeypatch.setenv("MOSIP_SECRET_KEY", secret)
+    monkeypatch.setenv("MOSIP_APP_ID", "resident")
+    seen: dict[str, str] = {}
+
+    class Response:
+        def __init__(self, payload):
+            self.status_code = 200
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def post(url, json=None, timeout=None):
+        assert url == "http://auth.test/v1/authmanager/authenticate/clientidsecretkey"
+        assert json["request"]["clientId"] == "register-id"
+        assert json["request"]["secretKey"] == secret
+        seen["auth"] = url
+        return Response({"response": {"status": "Success", "message": "tok-1"}})
+
+    def get(url, params=None, headers=None, timeout=None):
+        seen["cookie"] = headers["Cookie"]
+        seen["url"] = url
+        return Response({"response": {"identity": {"UIN": "1234567890", "fullName": "Ada"}}})
+
+    monkeypatch.setattr("register_id.idrepo_client.requests.post", post)
+    monkeypatch.setattr("register_id.idrepo_client.requests.get", get)
+    client = IDRepoClient(base_url="http://idrepo.test", enable_inprocess_fallback=False)
+    record = client.get_identity("1234567890")
+    assert record is not None
+    assert record["uin"] == "1234567890"
+    assert seen["cookie"] == "Authorization=tok-1"
+    assert secret not in seen["cookie"]
+
+
+def test_generate_uin_without_fallback_does_not_invent_a_uin(monkeypatch):
+    monkeypatch.delenv("MOSIP_CLIENT_ID", raising=False)
+    monkeypatch.delenv("MOSIP_SECRET_KEY", raising=False)
+    monkeypatch.delenv("MOSIP_AUTHMANAGER_URL", raising=False)
+    monkeypatch.delenv("MOSIP_IDGENERATOR_BASE_URL", raising=False)
+    called = []
+
+    def down(*args, **kwargs):
+        called.append(args[0] if args else kwargs.get("url"))
+        raise RuntimeError("idgenerator down")
+
+    monkeypatch.setattr("register_id.idrepo_client.requests.get", down)
+    client = IDRepoClient(base_url="http://idrepo.test", enable_inprocess_fallback=False)
+    assert client.generate_uin() == ""
+    assert client.last_status == 503
+    assert called == []
+
+
+def test_generate_uin_without_fallback_calls_kernel_not_idrepo(monkeypatch):
+    monkeypatch.delenv("MOSIP_IDGENERATOR_BASE_URL", raising=False)
+    monkeypatch.setenv("MOSIP_AUTHMANAGER_URL", "http://auth.test")
+    monkeypatch.setenv("MOSIP_CLIENT_ID", "register-id")
+    monkeypatch.setenv("MOSIP_SECRET_KEY", "mosip-secret-do-not-log")
+    seen: dict[str, str] = {}
+
+    class Response:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.cookies = {"Authorization": "tok-1"}
+
+        def json(self):
+            return self._payload
+
+    def post(url, json=None, timeout=None):
+        return Response(200, {"response": {"status": "Success"}})
+
+    def get(url, params=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["cookie"] = (headers or {}).get("Cookie", "")
+        return Response(200, {"response": {}})
+
+    monkeypatch.setattr("register_id.idrepo_client.requests.post", post)
+    monkeypatch.setattr("register_id.idrepo_client.requests.get", get)
+    client = IDRepoClient(base_url="http://idrepo.test", enable_inprocess_fallback=False)
+    assert client.generate_uin() == ""
+    assert client.last_status == 503
+    assert seen["url"] == "http://idgenerator.kernel/v1/idgenerator/uin"
+    assert seen["cookie"] == "Authorization=tok-1"
+    assert "idrepo.test" not in seen["url"]

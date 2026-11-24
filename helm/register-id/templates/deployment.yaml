@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "register-id.fullname" . }}
+  labels:
+    {{- include "register-id.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "register-id.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "register-id.selectorLabels" . | nindent 8 }}
+        {{- with .Values.commonLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- /* Kit securityContext overlays podSecurityContext; duplicate keys use the Kit value. */}}
+      {{- $podCtx := dict }}
+      {{- range $key, $val := (default (dict) .Values.podSecurityContext) }}
+      {{- $_ := set $podCtx $key $val }}
+      {{- end }}
+      {{- range $key, $val := (default (dict) .Values.securityContext) }}
+      {{- $_ := set $podCtx $key $val }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $podCtx | nindent 8 }}
+      containers:
+        - name: register-id
+          image: {{ include "register-id.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: HOME
+              value: /tmp
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: IDREPO_INPROCESS_FALLBACK
+              value: {{ .Values.mosip.inprocessFallback | quote }}
+            - name: MOSIP_IDREPO_BASE_URL
+              value: {{ .Values.mosip.idrepoBaseUrl | quote }}
+            - name: MOSIP_AUTHMANAGER_URL
+              value: {{ .Values.mosip.authmanagerUrl | quote }}
+            - name: MOSIP_APP_ID
+              value: {{ .Values.mosip.appId | quote }}
+            - name: MOSIP_IDGENERATOR_BASE_URL
+              value: {{ .Values.mosip.idgeneratorBaseUrl | quote }}
+            - name: MOSIP_HTTP_TIMEOUT
+              value: {{ .Values.mosip.httpTimeout | quote }}
+            - name: MOSIP_HTTP_RETRIES
+              value: {{ .Values.mosip.httpRetries | quote }}
+            - name: MOSIP_HTTP_BACKOFF_SECONDS
+              value: {{ .Values.mosip.httpBackoffSeconds | quote }}
+            - name: ENROLL_SUCCESS_LIMIT
+              value: {{ .Values.mosip.enrollSuccessLimit | quote }}
+            - name: KEYCLOAK_PUBLIC_URL
+              value: {{ .Values.keycloak.url | quote }}
+            - name: KEYCLOAK_INTERNAL_URL
+              value: {{ .Values.keycloak.internalUrl | quote }}
+            - name: KEYCLOAK_URL
+              value: {{ .Values.keycloak.url | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.keycloak.realm | quote }}
+            - name: KEYCLOAK_ADMIN_CLIENT_ID
+              value: {{ .Values.keycloak.adminClientId | quote }}
+            - name: KEYCLOAK_OIDC_CLIENT_ID
+              value: {{ .Values.keycloak.oidcClientId | quote }}
+            - name: KEYCLOAK_OIDC_REDIRECT_URI
+              value: {{ .Values.keycloak.redirectUri | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.extraEnvVars }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.livenessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readinessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

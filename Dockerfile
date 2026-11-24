@@ -3,7 +3,7 @@
 # ------------------------------------------------------------------------------
 # Base Builder Stage
 # ------------------------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim@sha256:531f855bda2c73cd6ef67d56b733b357cea384185b3022bd09f05e002cd144ca AS builder
 
 WORKDIR /app
 
@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ------------------------------------------------------------------------------
 # Development Stage (for Dev Containers & local development)
 # ------------------------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS development
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim@sha256:531f855bda2c73cd6ef67d56b733b357cea384185b3022bd09f05e002cd144ca AS development
 
 WORKDIR /app
 
@@ -61,7 +61,7 @@ CMD ["sleep", "infinity"]
 # ------------------------------------------------------------------------------
 # Citizen portal (Vite build served by the same app process)
 # ------------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS web
+FROM node:22-bookworm-slim@sha256:170fab707454b1350981adcdc2f536ec21f24d06d7f008e8d40064afeacb8a94 AS web
 
 WORKDIR /app
 
@@ -79,7 +79,7 @@ RUN pnpm install --frozen-lockfile && pnpm build
 # ------------------------------------------------------------------------------
 # Production Runner Stage (Lean, hardened production image)
 # ------------------------------------------------------------------------------
-FROM python:3.13-slim-bookworm AS runner
+FROM python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72 AS runner
 
 WORKDIR /app
 
@@ -92,6 +92,8 @@ RUN groupadd -g 1000 appgroup && \
 # Copy virtual environment and app code from builder
 COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
 COPY --from=builder --chown=appuser:appgroup /app/src /app/src
+# Local Compose bind-mounts this tree. The image CI pushes must not contain it.
+RUN rm -rf /app/src/mock
 COPY --from=builder --chown=appuser:appgroup /app/django_manage.py /app/django_manage.py
 COPY --from=builder --chown=appuser:appgroup /app/pyproject.toml /app/pyproject.toml
 COPY --from=web --chown=appuser:appgroup /app/web/dist /app/web/dist
@@ -100,7 +102,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/src:$PYTHONPATH"
 ENV PYTHONUNBUFFERED=1
 
-USER appuser
+USER 1000:1000
 
 EXPOSE 8000
 

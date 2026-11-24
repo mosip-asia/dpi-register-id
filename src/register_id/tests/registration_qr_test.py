@@ -93,14 +93,20 @@ def _png_by_cid(message, cid: str):
 
 def _enroll(uin: str, **extra) -> object:
     body = {
-        "uin": uin,
         "fullName": "Ada Lovelace",
         "email": "ada@citizen.asia",
         "faceImage": _data_url(f"portrait-{uin}".encode()),
         "consent": _consent(),
     }
     body.update(extra)
-    return client.post("/api/enroll", json=body, headers=enroll_headers())
+    from register_id.idrepo_client import IDRepoClient
+
+    original = IDRepoClient.generate_uin
+    IDRepoClient.generate_uin = lambda self, _uin=uin: _uin
+    try:
+        return client.post("/api/enroll", json=body, headers=enroll_headers())
+    finally:
+        IDRepoClient.generate_uin = original
 
 
 def test_registration_qr_is_the_uin_and_not_a_micro_symbol():
@@ -179,7 +185,7 @@ def test_smtp_failure_keeps_the_enrollment(monkeypatch: pytest.MonkeyPatch):
     assert stored["uin"] == uin
 
 
-def test_short_uin_is_rejected_before_mail_or_storage(monkeypatch: pytest.MonkeyPatch):
+def test_client_uin_is_rejected_before_mail_or_storage(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("EMAIL_PROVIDER", "gmail")
     monkeypatch.setenv("EMAIL_FROM", "sender@example.com")
     monkeypatch.setenv("EMAIL_PASSWORD", "app-password")
@@ -196,11 +202,19 @@ def test_short_uin_is_rejected_before_mail_or_storage(monkeypatch: pytest.Monkey
             return False
 
     monkeypatch.setattr("register_id.email.smtplib.SMTP", SpySMTP)
-    response = _enroll("12")
+    response = client.post(
+        "/api/enroll",
+        headers=enroll_headers(),
+        json={
+            "uin": "12",
+            "fullName": "Ada Lovelace",
+            "email": "ada@citizen.asia",
+            "faceImage": _data_url(b"portrait"),
+            "consent": _consent(),
+        },
+    )
     assert response.status_code == 422
-    detail = response.json()["detail"]
-    assert detail[0]["loc"] == ["body", "uin"]
-    assert "at least 4" in detail[0]["msg"]
+    assert "allocates the UIN" in response.text
     assert opened == []
     assert IDRepoClient(enable_inprocess_fallback=True).get_identity("12") is None
 
@@ -222,9 +236,9 @@ def test_descriptor_enroll_mails_the_same_qr(monkeypatch: pytest.MonkeyPatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["recordStatus"] == "draft"
-    assert "browser report is not a server liveness check" in body["message"]
-    assert "biometric" not in body["message"]
+    assert body["recordStatus"] == "biometric"
+    assert body["cbeffGenerated"] is True
+    uin = body["uin"]
     assert body["emailSent"] is True
     assert _png_by_cid(calls["message"], "uin-qr").get_content() == registration_qr_png(uin)
     assert "id-card" not in calls["message"].as_string()

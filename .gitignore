@@ -226,3 +226,6 @@ docker-compose.override.yml
 # Local agent indexes and session caches. Not part of the product.
 .winnow/
 .hallmark/
+
+# Runtime audit, staff, lock, and grant files. Not part of the product.
+logs/

@@ -103,9 +103,9 @@ The person opens the portal and the page loads its weights from the jsDelivr CDN
 
 From those landmarks the page does ordinary arithmetic. It tracks the eye-aspect ratio and a blink count, estimates yaw, and bins that yaw into five sectors from the person's left shoulder to the right: far-left, left, front, right, and far-right. Each accepted frame is kept as a JPEG data URL at quality 0.8. A live enrollment waits until all five sectors have a frame. A still photo is a single frontal JPEG and does not carry the five views.
 
-When the person submits, the page calls \texttt{POST /api/enroll} with the UIN, the legal name, the email, the frontal \texttt{faceImage}, and, for a live camera, \texttt{faceViews}: five pairs of sector, client yaw, and JPEG. The server refuses a vector supplied by the caller. It builds an ISO/IEC 19794-5 face record inside an ISO/IEC 19785-3 CBEFF document from the JPEG bytes, then runs \texttt{embed\_face\_image}. That function hashes those bytes with SHA-256 and maps the hash onto a 128-dimensional unit vector. The same JPEG always yields the same vector. A different JPEG lands far away. This is a duplicate-image check. It does not recognize a face. A live enrollment stores one vector per sector. A photo stores the single vector under the sector \texttt{front}.
+When the person submits, the page calls \texttt{POST /api/enroll} with the UIN, the legal name, the email, the frontal \texttt{faceImage}, and, for a live camera, \texttt{faceViews}: five pairs of sector, client yaw, and JPEG. The server refuses a vector supplied by the caller. A hash-only enrol is a draft and does not build or send CBEFF. CBEFF is sent only when the face-api path passes the biometric policy, posted as \texttt{individualBiometrics} with \texttt{recordStatus} biometric. The hash path runs \texttt{embed\_face\_image}. That function hashes those bytes with SHA-256 and maps the hash onto a 128-dimensional unit vector. The same JPEG always yields the same vector. A different JPEG lands far away. This is a duplicate-image check. It does not recognize a face. A live enrollment stores one vector per sector. A photo stores the single vector under the sector \texttt{front}.
 
-The gateway then writes through the IDRepo REST interface. The mock service, not FastAPI, opens SQL. The person, the JPEG text, and the CBEFF XML go to \texttt{mosip\_idrepo.citizen\_identity}. The vectors go to \texttt{mosip\_ida.face\_template}, one row per sector, keyed by UIN. The image stays in the identity row. It is not packed inside the vector. The response that comes back to the page is the status, the UIN, the name, and whether CBEFF was generated. The vector and the JPEG stay on the server.
+The gateway then writes through the IDRepo REST interface. The mock service, not FastAPI, opens SQL. The person and the JPEG text go to \texttt{mosip\_idrepo.citizen\_identity}. CBEFF XML is included only when the face-api path passes the biometric policy. A hash-only enrol stays a draft and does not send CBEFF. The vectors go to \texttt{mosip\_ida.face\_template}, one row per sector, keyed by UIN. The image stays in the identity row. It is not packed inside the vector. The response that comes back to the page is the status, the UIN, the name, and whether CBEFF was generated. The vector and the JPEG stay on the server.
 
 Login is a second step the diagram does not draw. After the identity is saved, the page can call \texttt{POST /api/credentials} with a password the person chooses. That password goes only to Keycloak. It is not written on the identity row.
 
@@ -304,10 +304,10 @@ A face is stored as the biometric of record only after the presentation check th
 \section{Modularity}
 
 \reqhead{BR-M-01}{IDRepo writes the citizen}{Partial}
-Only IDRepo creates or updates the citizen record. The gateway submits demographics, the CBEFF document, and server-built templates.
+Only IDRepo creates or updates the citizen record. The gateway submits demographics and server-built templates. It submits the CBEFF document only when the face-api path passes the biometric policy. A hash-only enrol is a draft and does not send CBEFF.
 \why{Later products will read the same person. A private copy inside the gateway will disagree with MOSIP about who exists.}
 \accept{
-  \item After enrollment, the UIN, name, email, and biometrics are readable from the IDRepo interface the environment points at.
+  \item After enrollment, the UIN, name, and email are readable from the IDRepo interface the environment points at. The CBEFF document is readable only when the face-api path passed the biometric policy.
   \item The enrollment screen keeps one destination when the team moves from the mock to real MOSIP.
   \item A credential request that fails leaves the IDRepo record in place.
 }

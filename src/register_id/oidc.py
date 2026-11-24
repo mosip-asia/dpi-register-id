@@ -38,6 +38,8 @@ from urllib.parse import quote, urlencode
 
 import requests
 
+from register_id.idrepo_client import _http_timeout, inprocess_fallback_enabled
+
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "register_id_session"
@@ -226,7 +228,7 @@ def begin_authorization() -> str:
         }
     )
     realm = quote(_realm(), safe="")
-    return f"{_keycloak_base()}/realms/{realm}/protocol/openid-connect/auth?{query}"
+    return f"{_keycloak_public_base()}/realms/{realm}/protocol/openid-connect/auth?{query}"
 
 
 def establish_session(code: str, state: str) -> SessionResult:
@@ -312,9 +314,11 @@ def _exchange_code(code: str, verifier: str) -> dict[str, Any]:
     }
     if secret:
         form["client_secret"] = secret
-    token_url = f"{_keycloak_base()}/realms/{quote(_realm(), safe='')}/protocol/openid-connect/token"
+    token_url = f"{_keycloak_internal_base()}/realms/{quote(_realm(), safe='')}/protocol/openid-connect/token"
     try:
-        response = requests.post(token_url, data=form, timeout=10, allow_redirects=False)
+        response = requests.post(
+            token_url, data=form, timeout=_http_timeout(), allow_redirects=False
+        )
     except requests.RequestException as exc:
         logger.warning("Keycloak token endpoint unreachable")
         raise OidcExchangeError("Sign-in could not be completed") from exc
@@ -395,10 +399,27 @@ def _required(name: str) -> str:
     return value
 
 
-def _keycloak_base() -> str:
-    base = os.getenv("KEYCLOAK_URL", "http://localhost:8080/auth").strip().rstrip("/")
+def _scoped_keycloak_base(name: str) -> str:
+    """Named host. KEYCLOAK_URL fills in only while local in-process fallback is on."""
+    base = os.getenv(name, "").strip()
+    if not base and inprocess_fallback_enabled():
+        base = os.getenv("KEYCLOAK_URL", "").strip()
+    return base.rstrip("/")
+
+
+def _keycloak_public_base() -> str:
+    """Browser-facing host, iam.<domain>."""
+    base = _scoped_keycloak_base("KEYCLOAK_PUBLIC_URL")
     if not base:
-        raise OidcConfigError("KEYCLOAK_URL is not configured")
+        raise OidcConfigError("KEYCLOAK_PUBLIC_URL is not configured")
+    return base
+
+
+def _keycloak_internal_base() -> str:
+    """In-cluster host used for the code exchange."""
+    base = _scoped_keycloak_base("KEYCLOAK_INTERNAL_URL")
+    if not base:
+        raise OidcConfigError("KEYCLOAK_INTERNAL_URL is not configured")
     return base
 
 

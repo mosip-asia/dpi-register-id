@@ -4,9 +4,10 @@
 #
 # Validates that the application stack is up, healthy, and operational:
 # 1. Health endpoint check: GET /health (expects status: ok)
-# 2. Web UI endpoint: GET / (expects register-id branding)
-# 3. Dynamic template endpoint: GET /example/1234 (expects id 1234 rendered)
-# 4. Django system check: uv run django_manage.py check (if available)
+# 2. Readiness endpoint check: GET /ready (expects status: ok)
+# 3. Web UI endpoint: GET / (expects register-id branding)
+# 4. Dynamic template endpoint: GET /example/1234 (expects id 1234 rendered)
+# 5. Django system check: uv run django_manage.py check (if available)
 #
 # Usage:
 #   bash scripts/smoke-test.sh [base_url]
@@ -33,7 +34,7 @@ BASE_URL="${BASE_URL%/}" # Strip trailing slash
 log_info "Target Base URL: ${BASE_URL}"
 
 # 1. Verify Health Endpoint
-log_info "1/4 Checking /health endpoint..."
+log_info "1/5 Checking /health endpoint..."
 HEALTH_URL="${BASE_URL}/health"
 HEALTH_RESPONSE=$(curl -sf --max-time 10 "$HEALTH_URL") || {
   log_fail "Could not reach health endpoint at ${HEALTH_URL}"
@@ -47,8 +48,22 @@ if ! echo "$HEALTH_RESPONSE" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; 
 fi
 log_ok "Health endpoint returned OK: ${HEALTH_RESPONSE}"
 
-# 2. Verify Web Index UI
-log_info "2/4 Checking Web Index at /..."
+# 2. Verify Readiness Endpoint
+log_info "2/5 Checking /ready endpoint..."
+READY_URL="${BASE_URL}/ready"
+READY_RESPONSE=$(curl -sf --max-time 10 "$READY_URL") || {
+  log_fail "Readiness endpoint did not return OK at ${READY_URL}"
+  exit 1
+}
+if ! echo "$READY_RESPONSE" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+  log_fail "Readiness endpoint did not return status 'ok':"
+  echo "$READY_RESPONSE" >&2
+  exit 1
+fi
+log_ok "Readiness endpoint returned OK: ${READY_RESPONSE}"
+
+# 3. Verify Web Index UI
+log_info "3/5 Checking Web Index at /..."
 INDEX_URL="${BASE_URL}/"
 INDEX_RESPONSE=$(curl -sf --max-time 10 "$INDEX_URL") || {
   log_fail "Could not reach web index at ${INDEX_URL}"
@@ -63,7 +78,7 @@ fi
 log_ok "Web index UI responded with valid template."
 
 # 3. Verify Dynamic Route
-log_info "3/4 Checking dynamic route at /example/1234..."
+log_info "4/5 Checking dynamic route at /example/1234..."
 EXAMPLE_URL="${BASE_URL}/example/1234"
 EXAMPLE_RESPONSE=$(curl -sf --max-time 10 "$EXAMPLE_URL") || {
   log_fail "Could not reach example route at ${EXAMPLE_URL}"
@@ -78,7 +93,7 @@ fi
 log_ok "Dynamic example route rendered successfully."
 
 # 4. Optional Django check if available
-log_info "4/4 Checking Django configuration..."
+log_info "5/5 Checking Django configuration..."
 if command -v uv >/dev/null 2>&1 && [ -f "django_manage.py" ]; then
   if uv run django_manage.py check --fail-level ERROR >/dev/null 2>&1; then
     log_ok "Django system check passed."
