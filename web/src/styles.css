@@ -641,11 +641,23 @@ textarea[aria-invalid="true"] {
 
 .facts p {
   display: grid;
-  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr) auto;
   gap: var(--space-md);
+  align-items: baseline;
   margin: 0;
   padding: var(--space-sm) 0;
   border-bottom: var(--rule);
+}
+
+.facts span {
+  overflow-wrap: anywhere;
+}
+
+.facts a.fact-edit {
+  color: var(--color-accent);
+  font-size: var(--text-meta);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .facts strong {
@@ -930,7 +942,8 @@ textarea[aria-invalid="true"] {
   .aside { margin-top: var(--space-lg); }
   .choice-grid,
   .paths { grid-template-columns: minmax(0, 1fr); }
-  .facts p { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .facts p { grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--space-md); }
+  .facts strong { grid-column: 1 / -1; }
 }
 
 @media (max-width: 640px) {

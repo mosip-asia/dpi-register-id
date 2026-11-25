@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { Frame } from "../ui";
+import { enrollStepCount, Frame } from "../ui";
 
 export function Tutorial() {
   return (
     <Frame
-      stepIndex={4}
-      stepCount={8}
+      stepIndex={5}
+      stepCount={enrollStepCount}
       kicker="Face check"
       title="How the face check works"
       lede="The scan takes about 20 seconds. The face model runs in this browser. At the end, your photo and a face signature go to the server."

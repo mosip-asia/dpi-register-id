@@ -12,6 +12,16 @@ export type FlowState = {
   gender: string;
   dateOfBirth: string;
   email: string;
+  phone: string;
+  referenceIdentityNumber: string;
+  addressLine1: string;
+  addressLine2: string;
+  addressLine3: string;
+  city: string;
+  zone: string;
+  province: string;
+  region: string;
+  postalCode: string;
   emailSent: boolean | null;
   consentAccepted: boolean;
   researchOptIn: boolean;
@@ -35,6 +45,16 @@ const empty: FlowState = {
   gender: "",
   dateOfBirth: "",
   email: "",
+  phone: "",
+  referenceIdentityNumber: "",
+  addressLine1: "",
+  addressLine2: "",
+  addressLine3: "",
+  city: "",
+  zone: "",
+  province: "",
+  region: "",
+  postalCode: "",
   emailSent: null,
   consentAccepted: false,
   researchOptIn: false,

@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { reportAttempt } from "../api";
-import { Frame } from "../ui";
+import { enrollStepCount, Frame } from "../ui";
 import { ApplicationSaveNotice, useSaveApplication } from "./saveApplication";
 
 export function CameraAccess() {
@@ -8,8 +8,8 @@ export function CameraAccess() {
 
   return (
     <Frame
-      stepIndex={5}
-      stepCount={8}
+      stepIndex={6}
+      stepCount={enrollStepCount}
       kicker="Camera"
       title="We need your camera"
       lede="Your browser will ask to use the camera. The camera is only used during the face check."

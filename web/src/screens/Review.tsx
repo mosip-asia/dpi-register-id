@@ -1,19 +1,23 @@
 import { Link } from "@tanstack/react-router";
 import { useFlow } from "../flow";
-import { Frame } from "../ui";
+import { citizenFields, displayValue, fieldMeta, identityReady } from "../identityFields";
+import { enrollStepCount, Frame } from "../ui";
 
 export function Review() {
-  const { photoDataUrl, scan, fullName, gender, dateOfBirth, email, update } = useFlow();
-  const scanned = Boolean(photoDataUrl && scan);
-  const canCreate = Boolean(
-    scanned && fullName.trim() && gender.trim() && dateOfBirth.trim() && email.trim(),
-  );
+  const flow = useFlow();
+  const scanned = Boolean(flow.photoDataUrl && flow.scan);
+  const canCreate = scanned && identityReady(flow);
 
   return (
-    <Frame stepIndex={7} stepCount={8} kicker="Review" title="Check before we create your ID">
+    <Frame
+      stepIndex={8}
+      stepCount={enrollStepCount}
+      kicker="Review"
+      title="Check before we create your ID"
+    >
       <div className="stack">
-        {photoDataUrl ? (
-          <img alt="Preview of the photo that will be stored with your ID" src={photoDataUrl} className="photo" />
+        {flow.photoDataUrl ? (
+          <img alt="Preview of the photo that will be stored with your ID" src={flow.photoDataUrl} className="photo" />
         ) : (
           <div className="panel">
             <p>No photo yet.</p>
@@ -25,23 +29,21 @@ export function Review() {
             : "No face scan yet."}
         </p>
         <div className="facts">
-          <p>
-            <strong>Full name</strong> <span>{fullName}</span>
-          </p>
-          <p>
-            <strong>Gender</strong> <span>{gender}</span>
-          </p>
-          <p>
-            <strong>Date of birth</strong> <span>{dateOfBirth}</span>
-          </p>
-          <p>
-            <strong>Email</strong> <span>{email}</span>
-          </p>
+          {citizenFields.map((field) => (
+            <p key={field}>
+              <strong>{fieldMeta[field].label}</strong>
+              <span>{displayValue(field, flow[field])}</span>
+              <Link to="/enroll/fix/$field" params={{ field }} className="fact-edit">
+                Edit
+              </Link>
+            </p>
+          ))}
         </div>
       </div>
       {canCreate ? null : (
         <p className="note" role="alert">
-          A face scan, name, gender, date of birth, and email are required before you continue.
+          A face scan and every required detail are needed before you continue. Address line 2 and address line 3 can
+          be left blank.
         </p>
       )}
       <div className="actions">
@@ -57,12 +59,9 @@ export function Review() {
         <Link
           to="/enroll/capture"
           className="secondary"
-          onClick={() => update({ scan: null, photoDataUrl: null })}
+          onClick={() => flow.update({ scan: null, photoDataUrl: null })}
         >
           {scanned ? "Scan again" : "Scan your face"}
-        </Link>
-        <Link to="/enroll/fix" className="secondary">
-          Edit date or email
         </Link>
       </div>
     </Frame>

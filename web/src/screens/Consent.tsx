@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useFlow } from "../flow";
-import { Frame } from "../ui";
+import { enrollStepCount, Frame } from "../ui";
 
 export function Consent() {
   const navigate = useNavigate();
@@ -9,7 +9,7 @@ export function Consent() {
   return (
     <Frame
       stepIndex={2}
-      stepCount={8}
+      stepCount={enrollStepCount}
       kicker="Consent"
       title="Before we take your photo"
     >

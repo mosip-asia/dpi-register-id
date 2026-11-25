@@ -6,13 +6,16 @@ import { useFlow } from "./flow";
 const enrollSteps = [
   { name: "Start", to: "/" },
   { name: "Consent", to: "/enroll/consent" },
-  { name: "Details", to: "/enroll/details" },
+  { name: "Your details", to: "/enroll/details" },
+  { name: "Your address", to: "/enroll/address" },
   { name: "Face check", to: "/enroll/tutorial" },
   { name: "Camera", to: "/enroll/camera" },
   { name: "Photo", to: "/enroll/capture" },
   { name: "Review", to: "/enroll/review" },
   { name: "ID", to: "/enroll/ready" },
 ] as const;
+
+export const enrollStepCount = enrollSteps.length;
 
 const proveSteps = [
   { name: "Service", to: "/prove" },
@@ -42,7 +45,7 @@ export function Frame({
 }) {
   const reduce = useReducedMotion();
   const flow = useFlow();
-  const steps = stepCount === 4 ? proveSteps : stepCount === 8 ? enrollSteps : [];
+  const steps = stepCount === 4 ? proveSteps : stepCount === enrollStepCount ? enrollSteps : [];
   const pastEnd = Boolean(stepIndex && steps.length > 0 && stepIndex > steps.length);
   const phoneStep =
     stepIndex && stepCount && stepIndex <= stepCount

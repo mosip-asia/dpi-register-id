@@ -13,6 +13,8 @@ import { CameraAccess } from "./screens/CameraAccess";
 import { Capture } from "./screens/Capture";
 import { Consent } from "./screens/Consent";
 import { Desk } from "./screens/Desk";
+import { addressReady, detailsReady } from "./identityFields";
+import { Address } from "./screens/Address";
 import { Details } from "./screens/Details";
 import { FaceCheck } from "./screens/FaceCheck";
 import { FixDetail } from "./screens/FixDetail";
@@ -47,22 +49,31 @@ function EnrollDetails() {
   return <Details />;
 }
 
-function afterDetails(Screen: () => ReactNode) {
+function afterIdentity(Screen: () => ReactNode) {
   return function GatedStep() {
     const flow = useFlow();
     if (!flow.consentAccepted) return <Navigate to="/enroll/consent" />;
-    const ready =
-      flow.fullName.trim() !== "" &&
-      flow.dateOfBirth.trim() !== "" &&
-      flow.gender.trim() !== "" &&
-      flow.email.trim() !== "";
-    if (!ready) return <Navigate to="/enroll/details" />;
+    if (!detailsReady(flow)) return <Navigate to="/enroll/details" />;
+    if (!addressReady(flow)) return <Navigate to="/enroll/address" />;
     return <Screen />;
   };
 }
 
+function EnrollAddress() {
+  const flow = useFlow();
+  if (!flow.consentAccepted) return <Navigate to="/enroll/consent" />;
+  if (!detailsReady(flow)) return <Navigate to="/enroll/details" />;
+  return <Address />;
+}
+
+function EnrollFix() {
+  const { consentAccepted } = useFlow();
+  if (!consentAccepted) return <Navigate to="/enroll/consent" />;
+  return <FixDetail />;
+}
+
 function afterScan(Screen: () => ReactNode, { allowEnrolled = false } = {}) {
-  return afterDetails(function ScannedStep() {
+  return afterIdentity(function ScannedStep() {
     const flow = useFlow();
     const scanned = Boolean(flow.photoDataUrl && flow.scan);
     // Ready keeps showing the new ID after enrollment clears the face data.
@@ -81,14 +92,15 @@ function ProveCheck() {
 const routeTree = rootRoute.addChildren([
   route("/", Landing),
   route("/enroll/details", EnrollDetails),
+  route("/enroll/address", EnrollAddress),
   route("/enroll/consent", Consent),
-  route("/enroll/tutorial", afterDetails(Tutorial)),
-  route("/enroll/camera", afterDetails(CameraAccess)),
-  route("/enroll/capture", afterDetails(Capture)),
+  route("/enroll/tutorial", afterIdentity(Tutorial)),
+  route("/enroll/camera", afterIdentity(CameraAccess)),
+  route("/enroll/capture", afterIdentity(Capture)),
   route("/enroll/help", Help),
   route("/enroll/paused", Paused),
   route("/enroll/review", afterScan(Review)),
-  route("/enroll/fix", afterDetails(FixDetail)),
+  route("/enroll/fix/$field", EnrollFix),
   route("/enroll/ready", afterScan(Ready, { allowEnrolled: true })),
   route("/prove", ServiceAsks),
   route("/prove/id", YourId),

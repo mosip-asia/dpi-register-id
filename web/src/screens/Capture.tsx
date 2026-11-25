@@ -4,7 +4,7 @@ import { CircleHelp } from "lucide-react";
 import { getFaceChallenge, reportAttempt, type FaceChallenge } from "../api";
 import type { ScanResult } from "../face/useFaceScan";
 import { useFlow } from "../flow";
-import { Frame } from "../ui";
+import { enrollStepCount, Frame } from "../ui";
 
 const FaceScanner = lazy(() =>
   import("../face/FaceScanner").then((mod) => ({ default: mod.FaceScanner })),
@@ -53,8 +53,8 @@ export function Capture() {
 
   return (
     <Frame
-      stepIndex={6}
-      stepCount={8}
+      stepIndex={7}
+      stepCount={enrollStepCount}
       kicker="Photo"
       title="Scan your face"
       aside={

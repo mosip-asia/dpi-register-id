@@ -171,15 +171,16 @@ export async function enrollCitizen(input: {
   liveness: LivenessReport;
   emailIdCard?: boolean;
   idCardImage?: string;
-  phone?: string;
-  addressLine1?: string;
-  addressLine2?: string;
-  addressLine3?: string;
-  region?: string;
-  province?: string;
-  city?: string;
-  zone?: string;
-  postalCode?: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2: string;
+  addressLine3: string;
+  region: string;
+  province: string;
+  city: string;
+  zone: string;
+  postalCode: string;
+  referenceIdentityNumber: string;
 }) {
   const ticket = await issueEnrollTicket();
   const emailIdCard = input.emailIdCard ?? false;
@@ -190,15 +191,16 @@ export async function enrollCitizen(input: {
       email: input.email,
       gender: input.gender,
       dateOfBirth: input.dateOfBirth,
-      phone: input.phone ?? "",
-      addressLine1: input.addressLine1 ?? "",
-      addressLine2: input.addressLine2 ?? "",
-      addressLine3: input.addressLine3 ?? "",
-      region: input.region ?? "",
-      province: input.province ?? "",
-      city: input.city ?? "",
-      zone: input.zone ?? "",
-      postalCode: input.postalCode ?? "",
+      phone: input.phone,
+      addressLine1: input.addressLine1,
+      addressLine2: input.addressLine2,
+      addressLine3: input.addressLine3,
+      region: input.region,
+      province: input.province,
+      city: input.city,
+      zone: input.zone,
+      postalCode: input.postalCode,
+      referenceIdentityNumber: input.referenceIdentityNumber,
       faceImage: input.faceImage,
       consent: {
         accepted: true,

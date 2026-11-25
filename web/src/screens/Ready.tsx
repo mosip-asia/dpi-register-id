@@ -4,7 +4,8 @@ import { useState } from "react";
 import { ApiError, enrollCitizen, FACE_ENGINE, reportAttempt, saveActivityToken } from "../api";
 import { IdCard } from "../IdCard";
 import { useFlow } from "../flow";
-import { CopyValue, Frame } from "../ui";
+import { identityReady } from "../identityFields";
+import { CopyValue, enrollStepCount, Frame } from "../ui";
 
 function firstName(fullName: string) {
   return fullName.trim().split(/\s+/)[0] ?? "";
@@ -27,25 +28,28 @@ export function Ready() {
     : "Create your ID";
 
   async function createId() {
-    if (
-      !flow.photoDataUrl ||
-      !flow.scan ||
-      !flow.fullName.trim() ||
-      !flow.email.trim() ||
-      !flow.gender.trim() ||
-      !flow.dateOfBirth.trim()
-    ) {
-      setError("Go back and scan your face again. A name, a gender, a date of birth, an email, and a scan are required.");
+    if (!flow.photoDataUrl || !flow.scan || !identityReady(flow)) {
+      setError("Go back and scan your face again. Every required detail and a scan are required.");
       return;
     }
     setPending(true);
     setError(null);
     try {
       const result = await enrollCitizen({
-        fullName: flow.fullName,
-        email: flow.email,
-        gender: flow.gender,
-        dateOfBirth: flow.dateOfBirth,
+        fullName: flow.fullName.trim(),
+        email: flow.email.trim(),
+        gender: flow.gender.trim(),
+        dateOfBirth: flow.dateOfBirth.trim(),
+        phone: flow.phone.trim(),
+        referenceIdentityNumber: flow.referenceIdentityNumber.trim(),
+        addressLine1: flow.addressLine1.trim(),
+        addressLine2: flow.addressLine2.trim(),
+        addressLine3: flow.addressLine3.trim(),
+        city: flow.city.trim(),
+        zone: flow.zone.trim(),
+        province: flow.province.trim(),
+        region: flow.region.trim(),
+        postalCode: flow.postalCode.trim(),
         faceImage: flow.photoDataUrl,
         faceDescriptors: flow.scan.descriptors,
         liveness: {
@@ -78,8 +82,8 @@ export function Ready() {
 
   return (
     <Frame
-      stepIndex={8}
-      stepCount={8}
+      stepIndex={9}
+      stepCount={enrollStepCount}
       kicker="Ready"
       title={title}
       aside={
