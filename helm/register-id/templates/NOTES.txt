@@ -13,5 +13,5 @@ Public host: {{ $publicHost }}
 {{- end }}
 {{- if not .Values.existingSecret }}
 
-existingSecret is empty. Point it at a Secret that holds MOSIP_CLIENT_ID, MOSIP_SECRET_KEY, KEYCLOAK_ADMIN_CLIENT_SECRET, and REDIS_URL.
+existingSecret is empty. Point it at a Secret that holds IDREPO_CLIENT_SECRET, KEYCLOAK_ADMIN_CLIENT_SECRET, and REDIS_URL. Set keycloak.idrepoClientId for the client id.
 {{- end }}

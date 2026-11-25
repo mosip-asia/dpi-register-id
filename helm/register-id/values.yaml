@@ -41,8 +41,6 @@ logLevel: INFO
 ## Non-secret MOSIP endpoints. Secrets stay in existingSecret.
 mosip:
   idrepoBaseUrl: ""
-  authmanagerUrl: ""
-  appId: regproc
   httpTimeout: "10"
   httpRetries: "2"
   httpBackoffSeconds: "0.5"
@@ -57,12 +55,15 @@ keycloak:
   internalUrl: ""
   realm: mosip
   adminClientId: ""
+  ## Confidential client for the IDRepo service token. No default.
+  ## IDREPO_CLIENT_SECRET is a key in existingSecret, never a value in this file.
+  idrepoClientId: ""
   oidcClientId: register-id
   ## https://register.<domain>/api/login/callback
   redirectUri: ""
 
 ## Secret keys the Kit supplies. The chart does not render secret values.
-## MOSIP_CLIENT_ID, MOSIP_SECRET_KEY, KEYCLOAK_ADMIN_CLIENT_SECRET,
+## IDREPO_CLIENT_SECRET, KEYCLOAK_ADMIN_CLIENT_SECRET,
 ## KEYCLOAK_OIDC_CLIENT_SECRET, REDIS_URL, DJANGO_SECRET_KEY,
 ## APPLICATION_STORE_KEY, REGISTER_ID_OPERATOR_TOKEN, EMAIL_PASSWORD
 existingSecret: ""

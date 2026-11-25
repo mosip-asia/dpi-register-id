@@ -33,8 +33,8 @@ def _configured(name: str, default: str) -> str:
 
 
 MOSIP_IDREPO_BASE_URL = _configured("MOSIP_IDREPO_BASE_URL", "http://localhost:8081")
-# Authmanager tokens are short-lived. Refresh before a typical one-hour expiry.
-_TOKEN_TTL_SECONDS = 540
+# Refresh the Keycloak access token this many seconds before expires_in.
+_TOKEN_REFRESH_SKEW_SECONDS = 30
 
 
 def inprocess_fallback_enabled() -> bool:
@@ -224,79 +224,72 @@ class IDRepoClient:
         self.last_backend: str | None = None
         self._test_client = None
         self._token: str | None = None
-        self._token_at: float = 0.0
+        self._token_until: float = 0.0
 
     def _auth_configured(self) -> bool:
         return bool(
-            os.getenv("MOSIP_AUTHMANAGER_URL", "").strip()
-            and os.getenv("MOSIP_CLIENT_ID", "").strip()
-            and os.getenv("MOSIP_SECRET_KEY", "").strip()
+            os.getenv("KEYCLOAK_INTERNAL_URL", "").strip()
+            and os.getenv("IDREPO_CLIENT_ID", "").strip()
+            and os.getenv("IDREPO_CLIENT_SECRET", "").strip()
         )
 
     def _mosip_token(self) -> str | None:
-        """Client-id secret from MOSIP authmanager. The secret and token are not logged."""
+        """Keycloak client_credentials token for IDRepo. The secret and token are not logged."""
         if not self._auth_configured():
             return None
-        if self._token and (time.monotonic() - self._token_at) < _TOKEN_TTL_SECONDS:
+        now = time.monotonic()
+        if self._token and now < self._token_until:
             return self._token
 
-        auth_base = os.environ["MOSIP_AUTHMANAGER_URL"].rstrip("/")
-        url = f"{auth_base}/v1/authmanager/authenticate/clientidsecretkey"
-        payload = {
-            "id": "mosip.auth.clientidsecretkey",
-            "version": "1.0",
-            "requesttime": self._now_iso(),
-            "metadata": {},
-            "request": {
-                "clientId": os.environ["MOSIP_CLIENT_ID"],
-                "secretKey": os.environ["MOSIP_SECRET_KEY"],
-                "appId": os.getenv("MOSIP_APP_ID", "").strip() or "regproc",
-            },
+        base = os.environ["KEYCLOAK_INTERNAL_URL"].rstrip("/")
+        realm = os.getenv("KEYCLOAK_REALM", "").strip() or "mosip"
+        url = f"{base}/realms/{realm}/protocol/openid-connect/token"
+        form = {
+            "grant_type": "client_credentials",
+            "client_id": os.environ["IDREPO_CLIENT_ID"],
+            "client_secret": os.environ["IDREPO_CLIENT_SECRET"],
         }
-        # This cookie is an authmanager clientidsecretkey token for appId regproc, not a Keycloak access token.
         # A token POST is not retried on an HTTP error. One extra attempt covers a lost connection.
         response = None
         for attempt in range(2):
             try:
-                response = requests.post(url, json=payload, timeout=_http_timeout())
+                response = requests.post(url, data=form, timeout=_http_timeout())
             except requests.RequestException:
                 if attempt == 0:
                     delay = _http_backoff()
                     if delay:
                         time.sleep(delay)
                     continue
-                logger.warning("MOSIP authmanager unreachable")
+                logger.warning("Keycloak token endpoint unreachable")
                 return None
             else:
                 break
-        if response.status_code != 200:
-            logger.warning("MOSIP authmanager returned status %s", response.status_code)
+        if response is None or response.status_code != 200:
+            status = getattr(response, "status_code", "unreachable")
+            logger.warning("Keycloak token endpoint returned status %s", status)
             return None
         try:
             data = response.json()
         except ValueError:
-            logger.warning("MOSIP authmanager response was not JSON")
+            logger.warning("Keycloak token response was not JSON")
             return None
-        body = data.get("response") if isinstance(data, dict) else None
-        token = None
-        cookies = getattr(response, "cookies", None)
-        cookie = cookies.get("Authorization") if cookies is not None else None
-        if cookie:
-            token = str(cookie)
-        elif isinstance(body, dict):
-            message = body.get("message") or body.get("token")
-            # Authmanager often puts a success sentence in message and the JWT in Set-Cookie.
-            if isinstance(message, str) and "validated successfully" not in message.lower():
-                token = message
+        token = data.get("access_token") if isinstance(data, dict) else None
         if not token:
-            logger.warning("MOSIP authmanager response did not include a token")
+            logger.warning("Keycloak token response did not include an access token")
             return None
+        expires_in = data.get("expires_in") if isinstance(data, dict) else None
+        try:
+            lifetime = float(expires_in) - _TOKEN_REFRESH_SKEW_SECONDS
+        except (TypeError, ValueError):
+            lifetime = 0.0
+        if lifetime < 0:
+            lifetime = 0.0
         self._token = str(token)
-        self._token_at = time.monotonic()
+        self._token_until = time.monotonic() + lifetime
         return self._token
 
     def _headers(self) -> dict[str, str]:
-        """MOSIP kernel sends the authmanager token as a cookie, not a Bearer header."""
+        """IDRepo takes the Keycloak access token as a cookie, matching the Kit eSignet journey."""
         headers = {"Content-Type": "application/json"}
         token = self._mosip_token()
         if token:
@@ -407,7 +400,7 @@ class IDRepoClient:
         Allocate a UIN from the kernel idgenerator. A failed call does not invent a number.
         """
         self.last_status = None
-        # Production must present the authmanager cookie. No cookie, no invented UIN.
+        # Production must present the IDRepo service token. No cookie, no invented UIN.
         if not self.enable_inprocess_fallback and not self._mosip_token():
             self.last_status = 503
             self.last_error = "MOSIP idgenerator did not return a UIN"

@@ -74,7 +74,6 @@ services:
   app:
     environment:
       MOSIP_IDREPO_BASE_URL: "http://idrepo:8080"
-      MOSIP_AUTHMANAGER_URL: "http://idrepo:8080"
       MOSIP_IDGENERATOR_BASE_URL: "http://idrepo:8080"
       KEYCLOAK_URL: "http://keycloak:8080"
       KEYCLOAK_PUBLIC_URL: "http://localhost:8080/auth"

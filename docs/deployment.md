@@ -74,7 +74,7 @@ The Sandbox Kit installs only Helm charts and pins every image by digest. Chart 
 
 The public host is one label under the environment domain: `register.<domain>`. CI still pushes `ghcr.io/mosip-asia/dpi-register-id` and writes `ghcr.io/mosip-asia/dpi-register-id@sha256:…` in the job summary and the `image-digest` artifact. The Kit cannot pull that package anonymously. Mirror the image to Docker Hub or another registry the Kit can pull, then set `image.registry`, `image.repository`, and `image.digest` to the mirrored digest. The workflow does not change GHCR package visibility.
 
-`/health` is the liveness probe. `/ready` checks Redis and that configuration is loaded. It does not call IDRepo. The process logs to stdout and runs as uid 1000. MOSIP calls use an authmanager client id and secret. Keycloak admin calls use only a realm service account (`KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET`). `KEYCLOAK_PUBLIC_URL` is the browser host and `KEYCLOAK_INTERNAL_URL` is the in-cluster host.
+`/health` is the liveness probe. `/ready` checks Redis and that configuration is loaded. It does not call IDRepo. The process logs to stdout and runs as uid 1000. IDRepo calls use a Keycloak `client_credentials` token (`IDREPO_CLIENT_ID` / `IDREPO_CLIENT_SECRET`) sent as `Cookie: Authorization`. Keycloak admin calls use only a realm service account (`KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET`). `KEYCLOAK_PUBLIC_URL` is the browser host and `KEYCLOAK_INTERNAL_URL` is the in-cluster host.
 
 ## 5. Fail-Forward Policy & Rollback
 

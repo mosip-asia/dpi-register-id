@@ -9,9 +9,10 @@ helm install register-id ./helm/register-id \
   --set image.digest=sha256:<mirrored digest> \
   --set publicHost.domain=sandbox.example.net \
   --set mosip.idrepoBaseUrl=http://id-repository \
-  --set mosip.authmanagerUrl=http://authmanager \
   --set keycloak.url=https://iam.sandbox.example.net/auth \
+  --set keycloak.internalUrl=http://keycloak.keycloak/auth \
   --set keycloak.adminClientId=register-id \
+  --set keycloak.idrepoClientId=idrepo-client \
   --set keycloak.redirectUri=https://register.sandbox.example.net/api/login/callback \
   --set existingSecret=register-id
 ```
@@ -20,7 +21,7 @@ helm install register-id ./helm/register-id \
 
 `extraEnv` and `extraEnvVars` are both applied. `securityContext` is a pod securityContext merged onto `podSecurityContext` (Kit keys win on duplicates). `containerSecurityContext` is unchanged.
 
-`existingSecret` must define `MOSIP_CLIENT_ID`, `MOSIP_SECRET_KEY`, `KEYCLOAK_ADMIN_CLIENT_SECRET`, `REDIS_URL`, and the other secret keys listed in `values.yaml`. The chart does not embed those values.
+`existingSecret` must define `IDREPO_CLIENT_SECRET`, `KEYCLOAK_ADMIN_CLIENT_SECRET`, `REDIS_URL`, and the other secret keys listed in `values.yaml`. The chart does not embed those values. `keycloak.idrepoClientId` is the IDRepo client id. The matching secret stays in that Secret.
 
 The container runs as uid/gid 1000, reads configuration from the environment, logs to stdout, and serves `/health` (liveness) and `/ready` (Redis and loaded configuration). `/ready` does not call IDRepo.
 

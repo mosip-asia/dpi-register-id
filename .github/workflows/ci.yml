@@ -135,8 +135,8 @@ jobs:
             --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             --set publicHost.domain=sandbox.example.net \
             --set mosip.idrepoBaseUrl=http://id-repository \
-            --set mosip.authmanagerUrl=http://authmanager \
             --set keycloak.url=https://iam.sandbox.example.net/auth \
+            --set keycloak.idrepoClientId=idrepo-client \
             --set keycloak.internalUrl=http://keycloak.keycloak/auth \
             --set existingSecret=register-id \
             | grep -q 'register-id.mosip.io/host: "register.sandbox.example.net"'

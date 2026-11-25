@@ -41,9 +41,8 @@ def _config_ready() -> bool:
     required = (
         "REDIS_URL",
         "MOSIP_IDREPO_BASE_URL",
-        "MOSIP_AUTHMANAGER_URL",
-        "MOSIP_CLIENT_ID",
-        "MOSIP_SECRET_KEY",
+        "IDREPO_CLIENT_ID",
+        "IDREPO_CLIENT_SECRET",
         "KEYCLOAK_ADMIN_CLIENT_ID",
         "KEYCLOAK_ADMIN_CLIENT_SECRET",
     )

@@ -337,13 +337,16 @@ def test_enroll_failure_log_drops_non_json_body(monkeypatch, caplog):
     assert leaked not in caplog.text
 
 
-def test_remote_read_sends_authmanager_cookie(monkeypatch):
-    secret = "mosip-secret-do-not-log"
-    monkeypatch.setenv("MOSIP_AUTHMANAGER_URL", "http://auth.test")
-    monkeypatch.setenv("MOSIP_CLIENT_ID", "register-id")
-    monkeypatch.setenv("MOSIP_SECRET_KEY", secret)
-    monkeypatch.setenv("MOSIP_APP_ID", "resident")
+def test_remote_read_sends_keycloak_cookie(monkeypatch):
+    secret = "idrepo-secret-do-not-log"
+    monkeypatch.setenv("KEYCLOAK_INTERNAL_URL", "http://keycloak.test/auth")
+    monkeypatch.setenv("KEYCLOAK_REALM", "mosip")
+    monkeypatch.setenv("IDREPO_CLIENT_ID", "idrepo-client")
+    monkeypatch.setenv("IDREPO_CLIENT_SECRET", secret)
     seen: dict[str, str] = {}
+    posts: list[str] = []
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr("register_id.idrepo_client.time.monotonic", lambda: clock["now"])
 
     class Response:
         def __init__(self, payload):
@@ -353,12 +356,16 @@ def test_remote_read_sends_authmanager_cookie(monkeypatch):
         def json(self):
             return self._payload
 
-    def post(url, json=None, timeout=None):
-        assert url == "http://auth.test/v1/authmanager/authenticate/clientidsecretkey"
-        assert json["request"]["clientId"] == "register-id"
-        assert json["request"]["secretKey"] == secret
-        seen["auth"] = url
-        return Response({"response": {"status": "Success", "message": "tok-1"}})
+    def post(url, data=None, timeout=None, **kwargs):
+        assert "json" not in kwargs
+        assert url == "http://keycloak.test/auth/realms/mosip/protocol/openid-connect/token"
+        assert data == {
+            "grant_type": "client_credentials",
+            "client_id": "idrepo-client",
+            "client_secret": secret,
+        }
+        posts.append(url)
+        return Response({"access_token": "tok-1", "expires_in": 90})
 
     def get(url, params=None, headers=None, timeout=None):
         seen["cookie"] = headers["Cookie"]
@@ -374,11 +381,19 @@ def test_remote_read_sends_authmanager_cookie(monkeypatch):
     assert seen["cookie"] == "Authorization=tok-1"
     assert secret not in seen["cookie"]
 
+    clock["now"] = 1_059.0
+    client.get_identity("1234567890")
+    assert len(posts) == 1
+
+    clock["now"] = 1_060.0
+    client.get_identity("1234567890")
+    assert len(posts) == 2
+
 
 def test_generate_uin_without_fallback_does_not_invent_a_uin(monkeypatch):
-    monkeypatch.delenv("MOSIP_CLIENT_ID", raising=False)
-    monkeypatch.delenv("MOSIP_SECRET_KEY", raising=False)
-    monkeypatch.delenv("MOSIP_AUTHMANAGER_URL", raising=False)
+    monkeypatch.delenv("IDREPO_CLIENT_ID", raising=False)
+    monkeypatch.delenv("IDREPO_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("KEYCLOAK_INTERNAL_URL", raising=False)
     monkeypatch.delenv("MOSIP_IDGENERATOR_BASE_URL", raising=False)
     called = []
 
@@ -395,22 +410,23 @@ def test_generate_uin_without_fallback_does_not_invent_a_uin(monkeypatch):
 
 def test_generate_uin_without_fallback_calls_kernel_not_idrepo(monkeypatch):
     monkeypatch.delenv("MOSIP_IDGENERATOR_BASE_URL", raising=False)
-    monkeypatch.setenv("MOSIP_AUTHMANAGER_URL", "http://auth.test")
-    monkeypatch.setenv("MOSIP_CLIENT_ID", "register-id")
-    monkeypatch.setenv("MOSIP_SECRET_KEY", "mosip-secret-do-not-log")
+    monkeypatch.setenv("KEYCLOAK_INTERNAL_URL", "http://keycloak.test/auth")
+    monkeypatch.setenv("KEYCLOAK_REALM", "mosip")
+    monkeypatch.setenv("IDREPO_CLIENT_ID", "idrepo-client")
+    monkeypatch.setenv("IDREPO_CLIENT_SECRET", "idrepo-secret-do-not-log")
     seen: dict[str, str] = {}
 
     class Response:
         def __init__(self, status_code, payload):
             self.status_code = status_code
             self._payload = payload
-            self.cookies = {"Authorization": "tok-1"}
 
         def json(self):
             return self._payload
 
-    def post(url, json=None, timeout=None):
-        return Response(200, {"response": {"status": "Success"}})
+    def post(url, data=None, timeout=None):
+        assert data["grant_type"] == "client_credentials"
+        return Response(200, {"access_token": "tok-1", "expires_in": 300})
 
     def get(url, params=None, headers=None, timeout=None):
         seen["url"] = url
