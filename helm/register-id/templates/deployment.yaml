@@ -55,7 +55,7 @@ spec:
             - name: IDREPO_INPROCESS_FALLBACK
               value: {{ .Values.mosip.inprocessFallback | quote }}
             - name: MOSIP_IDREPO_BASE_URL
-              value: {{ .Values.mosip.idrepoBaseUrl | quote }}
+              value: {{ required "mosip.idrepoBaseUrl is required" .Values.mosip.idrepoBaseUrl | quote }}
             - name: MOSIP_IDGENERATOR_BASE_URL
               value: {{ .Values.mosip.idgeneratorBaseUrl | quote }}
             - name: MOSIP_HTTP_TIMEOUT
@@ -67,39 +67,35 @@ spec:
             - name: ENROLL_SUCCESS_LIMIT
               value: {{ .Values.mosip.enrollSuccessLimit | quote }}
             - name: KEYCLOAK_PUBLIC_URL
-              value: {{ .Values.keycloak.url | quote }}
+              value: {{ required "keycloak.url is required" .Values.keycloak.url | quote }}
             - name: KEYCLOAK_INTERNAL_URL
-              value: {{ .Values.keycloak.internalUrl | quote }}
+              value: {{ required "keycloak.internalUrl is required" .Values.keycloak.internalUrl | quote }}
             - name: KEYCLOAK_URL
-              value: {{ .Values.keycloak.url | quote }}
+              value: {{ required "keycloak.url is required" .Values.keycloak.url | quote }}
             - name: KEYCLOAK_REALM
               value: {{ .Values.keycloak.realm | quote }}
             - name: KEYCLOAK_ADMIN_CLIENT_ID
-              value: {{ .Values.keycloak.adminClientId | quote }}
+              value: {{ required "keycloak.adminClientId is required" .Values.keycloak.adminClientId | quote }}
             - name: IDREPO_CLIENT_ID
-              value: {{ .Values.keycloak.idrepoClientId | quote }}
-            {{- if .Values.existingSecret }}
+              value: {{ required "keycloak.idrepoClientId is required" .Values.keycloak.idrepoClientId | quote }}
             - name: IDREPO_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.existingSecret }}
+                  name: {{ required "existingSecret is required" .Values.existingSecret }}
                   key: IDREPO_CLIENT_SECRET
-            {{- end }}
             - name: KEYCLOAK_OIDC_CLIENT_ID
               value: {{ .Values.keycloak.oidcClientId | quote }}
             - name: KEYCLOAK_OIDC_REDIRECT_URI
-              value: {{ .Values.keycloak.redirectUri | quote }}
+              value: {{ required "keycloak.redirectUri is required" .Values.keycloak.redirectUri | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
             {{- with .Values.extraEnvVars }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if .Values.existingSecret }}
           envFrom:
             - secretRef:
-                name: {{ .Values.existingSecret }}
-          {{- end }}
+                name: {{ required "existingSecret is required" .Values.existingSecret }}
           livenessProbe:
             httpGet:
               path: {{ .Values.livenessProbe.path }}

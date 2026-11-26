@@ -31,11 +31,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "register-id.image" -}}
-{{- if .Values.image.digest -}}
-{{- printf "%s/%s@%s" .Values.image.registry .Values.image.repository .Values.image.digest -}}
-{{- else -}}
-{{- printf "%s/%s:%s" .Values.image.registry .Values.image.repository .Values.image.tag -}}
-{{- end -}}
+{{- printf "%s/%s@%s" .Values.image.registry .Values.image.repository (required "image.digest is required" .Values.image.digest) -}}
 {{- end -}}
 
 {{/*

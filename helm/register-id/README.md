@@ -17,6 +17,8 @@ helm install register-id ./helm/register-id \
   --set existingSecret=register-id
 ```
 
+Required values: `mosip.idrepoBaseUrl`, `keycloak.url`, `keycloak.internalUrl`, `keycloak.idrepoClientId`, `keycloak.adminClientId`, `keycloak.redirectUri`, `existingSecret`, `image.digest`.
+
 `publicHost.domain` is the environment domain. The chart records `register.<domain>` on the Service annotation `register-id.mosip.io/host` and does not render an Ingress. A host such as `register.id.<domain>` is two labels below that domain, which the Kit does not route.
 
 `extraEnv` and `extraEnvVars` are both applied. `securityContext` is a pod securityContext merged onto `podSecurityContext` (Kit keys win on duplicates). `containerSecurityContext` is unchanged.
@@ -27,4 +29,4 @@ The container runs as uid/gid 1000, reads configuration from the environment, lo
 
 This chart does not generate `KEYCLOAK_ADMIN_CLIENT_SECRET`. The Kit supplies it in `existingSecret`. The confidential client uses `client_credentials` and only the realm-management roles `manage-users` and `view-users`. Those roles are not created by this repository. Set `keycloak.internalUrl` to the in-cluster Keycloak service and `keycloak.url` to `https://iam.<domain>/auth`.
 
-The Kit deploy sets `image.digest` to the mirrored digest and does not pull GHCR anonymously. CI still pushes `ghcr.io/mosip-asia/dpi-register-id`. Copy that image to Docker Hub or another registry the Kit can pull, then set `image.registry`, `image.repository`, and `image.digest` to the mirrored copy. An empty `image.digest` renders `image.registry/image.repository:image.tag` (`ghcr.io/mosip-asia/dpi-register-id:0.1.0` with the chart defaults) for local renders only.
+The Kit deploy sets `image.digest` to the mirrored digest and does not pull GHCR anonymously. CI still pushes `ghcr.io/mosip-asia/dpi-register-id`. Copy that image to Docker Hub or another registry the Kit can pull, then set `image.registry`, `image.repository`, and `image.digest` to the mirrored copy.

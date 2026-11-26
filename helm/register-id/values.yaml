@@ -8,8 +8,7 @@ replicaCount: 1
 
 ## CI still pushes ghcr.io/mosip-asia/dpi-register-id. The Kit cannot pull GHCR
 ## anonymously. Set registry, repository, and digest to the mirrored copy
-## (Docker Hub or another registry the Kit can pull). Empty digest renders
-## registry/repository:tag for local helm template only.
+## (Docker Hub or another registry the Kit can pull). image.digest is required.
 image:
   registry: ghcr.io
   repository: mosip-asia/dpi-register-id

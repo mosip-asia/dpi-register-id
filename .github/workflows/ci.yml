@@ -14,6 +14,12 @@ jobs:
   test:
     name: 🧪 Unit & Integration Tests
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -136,7 +142,9 @@ jobs:
             --set publicHost.domain=sandbox.example.net \
             --set mosip.idrepoBaseUrl=http://id-repository \
             --set keycloak.url=https://iam.sandbox.example.net/auth \
-            --set keycloak.idrepoClientId=idrepo-client \
             --set keycloak.internalUrl=http://keycloak.keycloak/auth \
+            --set keycloak.idrepoClientId=idrepo-client \
+            --set keycloak.adminClientId=register-id \
+            --set keycloak.redirectUri=https://register.sandbox.example.net/api/login/callback \
             --set existingSecret=register-id \
             | grep -q 'register-id.mosip.io/host: "register.sandbox.example.net"'
