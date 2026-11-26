@@ -220,7 +220,6 @@ def _head_sweep_views(prefix: str) -> list[dict]:
 
 
 def test_api_enroll_and_authenticate_head_sweep():
-    uin = "9876-5432-1100"
     views = _head_sweep_views("sweep-enroll")
 
     enroll_res = client.post(
@@ -237,6 +236,7 @@ def test_api_enroll_and_authenticate_head_sweep():
     assert enroll_res.status_code == 200
     assert enroll_res.json()["status"] == "SUCCESS"
     assert "keycloakProvisioned" not in enroll_res.json()
+    uin = enroll_res.json()["uin"]
 
     idrepo = IDRepoClient(enable_inprocess_fallback=True)
     stored = idrepo.get_identity(uin)
