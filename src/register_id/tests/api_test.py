@@ -1,7 +1,10 @@
 import base64
 import json
+import logging
+import re
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from redis.exceptions import RedisError
 from project.web import app
@@ -465,6 +468,168 @@ def _enroll_body(uin: str, *, accepted: bool = True) -> dict:
 
 def _stored(uin: str):
     return IDRepoClient(enable_inprocess_fallback=True).get_identity(uin)
+
+
+_IDREPO_SECRET = "idrepo-client-secret-do-not-log"
+_CITIZEN_ID_FAILURE = re.compile(
+    r"^We couldn't create your ID right now\. Please try again later\. Reference: ([0-9a-f]{32})$"
+)
+
+
+class _TokenResponse:
+    def __init__(self, status_code: int, body: dict | str):
+        self.status_code = status_code
+        self.text = body if isinstance(body, str) else json.dumps(body)
+        self._body = body
+
+    def json(self):
+        if isinstance(self._body, str):
+            raise ValueError("not json")
+        return self._body
+
+
+def _assert_citizen_id_failure(response, caplog, *, status: int, reason: str):
+    assert response.status_code == status
+    detail = response.json()["detail"]
+    match = _CITIZEN_ID_FAILURE.match(detail)
+    assert match, detail
+    request_id = match.group(1)
+    assert f"request_id={request_id} {reason}" in caplog.text
+    image = _enroll_body("unused")["faceImage"]
+    for leaked in (_IDREPO_SECRET, image, "MOSIP", "IDRepo", "idgenerator", "Keycloak"):
+        assert leaked not in detail
+        assert leaked not in response.text
+    assert _IDREPO_SECRET not in caplog.text
+    assert image not in caplog.text
+
+
+def _enroll_against_keycloak(
+    monkeypatch,
+    caplog,
+    post,
+    *,
+    client_id: str | None = "register-id-idrepo",
+    secret: str | None = _IDREPO_SECRET,
+    realm: str = "mosip",
+):
+    monkeypatch.setenv("IDREPO_INPROCESS_FALLBACK", "false")
+    monkeypatch.setenv("KEYCLOAK_INTERNAL_URL", "http://keycloak.test/auth")
+    monkeypatch.setenv("KEYCLOAK_REALM", realm)
+    if client_id is None:
+        monkeypatch.delenv("IDREPO_CLIENT_ID", raising=False)
+    else:
+        monkeypatch.setenv("IDREPO_CLIENT_ID", client_id)
+    if secret is None:
+        monkeypatch.delenv("IDREPO_CLIENT_SECRET", raising=False)
+    else:
+        monkeypatch.setenv("IDREPO_CLIENT_SECRET", secret)
+    monkeypatch.setenv("MOSIP_HTTP_RETRIES", "0")
+    monkeypatch.setenv("MOSIP_HTTP_BACKOFF_SECONDS", "0")
+    monkeypatch.delenv("MOSIP_IDGENERATOR_BASE_URL", raising=False)
+    repo = IDRepoClient(base_url="http://idrepo.test", enable_inprocess_fallback=False)
+    monkeypatch.setattr("register_id.api.get_idrepo_client", lambda: repo)
+    monkeypatch.setattr("register_id.idrepo_client.requests.post", post)
+    calls: list[str] = []
+
+    def get(url, params=None, headers=None, timeout=None):
+        calls.append(url)
+        return _TokenResponse(200, {"response": {}})
+
+    monkeypatch.setattr("register_id.idrepo_client.requests.get", get)
+    with caplog.at_level(logging.ERROR, logger="register_id.api"):
+        response = client.post("/api/enroll", headers=enroll_headers(), json=_enroll_body("unused"))
+    return response, calls
+
+
+def test_enroll_without_idrepo_client_credentials_names_the_token_step(monkeypatch, caplog):
+    posts: list[str] = []
+
+    def post(url, data=None, timeout=None):
+        posts.append(url)
+        return _TokenResponse(401, {"error": "unauthorized", "error_description": _IDREPO_SECRET})
+
+    response, gets = _enroll_against_keycloak(monkeypatch, caplog, post, client_id=None)
+    _assert_citizen_id_failure(
+        response,
+        caplog,
+        status=503,
+        reason="No IDRepo token: IDREPO_CLIENT_ID / IDREPO_CLIENT_SECRET is not set",
+    )
+    assert posts == []
+    assert gets == []
+
+
+def test_enroll_without_idrepo_client_secret_names_the_token_step(monkeypatch, caplog):
+    def post(url, data=None, timeout=None):
+        raise AssertionError("Keycloak was called without a client secret")
+
+    response, gets = _enroll_against_keycloak(monkeypatch, caplog, post, secret=None)
+    _assert_citizen_id_failure(
+        response,
+        caplog,
+        status=503,
+        reason="No IDRepo token: IDREPO_CLIENT_ID / IDREPO_CLIENT_SECRET is not set",
+    )
+    assert gets == []
+
+
+def test_enroll_returns_502_when_keycloak_rejects_the_idrepo_client(monkeypatch, caplog):
+    def post(url, data=None, timeout=None):
+        assert data["client_secret"] == _IDREPO_SECRET
+        return _TokenResponse(401, {"error": "unauthorized", "error_description": _IDREPO_SECRET})
+
+    response, gets = _enroll_against_keycloak(monkeypatch, caplog, post)
+    _assert_citizen_id_failure(
+        response,
+        caplog,
+        status=502,
+        reason="Keycloak rejected the IDRepo client (401)",
+    )
+    assert gets == []
+
+
+def test_enroll_reports_a_missing_keycloak_realm(monkeypatch, caplog):
+    def post(url, data=None, timeout=None):
+        assert url.endswith("/realms/sandbox/protocol/openid-connect/token")
+        return _TokenResponse(404, {"error": _IDREPO_SECRET})
+
+    response, gets = _enroll_against_keycloak(monkeypatch, caplog, post, realm="sandbox")
+    _assert_citizen_id_failure(
+        response,
+        caplog,
+        status=502,
+        reason="Keycloak realm 'sandbox' not found",
+    )
+    assert gets == []
+
+
+def test_enroll_reports_keycloak_unreachable(monkeypatch, caplog):
+    def post(url, data=None, timeout=None):
+        raise requests.RequestException("timed out talking to keycloak")
+
+    response, gets = _enroll_against_keycloak(monkeypatch, caplog, post)
+    _assert_citizen_id_failure(
+        response,
+        caplog,
+        status=503,
+        reason="Keycloak unreachable at KEYCLOAK_INTERNAL_URL",
+    )
+    assert gets == []
+    assert "timed out talking to keycloak" not in caplog.text
+
+
+def test_enroll_reports_idgenerator_only_after_a_token(monkeypatch, caplog):
+    def post(url, data=None, timeout=None):
+        return _TokenResponse(200, {"access_token": "tok-1", "expires_in": 300})
+
+    response, gets = _enroll_against_keycloak(monkeypatch, caplog, post)
+    _assert_citizen_id_failure(
+        response,
+        caplog,
+        status=503,
+        reason="MOSIP idgenerator did not return a UIN",
+    )
+    assert gets == ["http://idgenerator.kernel/v1/idgenerator/uin"]
 
 
 def test_enroll_requires_a_server_ticket_and_hides_it_from_html():

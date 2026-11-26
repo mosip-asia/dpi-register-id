@@ -48,24 +48,38 @@ spec:
           env:
             - name: HOME
               value: /tmp
+            - name: PROJECT_NAME
+              value: {{ required "projectName is required" .Values.projectName | quote }}
             - name: ENVIRONMENT
-              value: {{ .Values.environment | quote }}
+              value: {{ required "environment is required" .Values.environment | quote }}
+            - name: BUILD_VERSION
+              value: {{ required "buildVersion is required" .Values.buildVersion | quote }}
             - name: LOG_LEVEL
-              value: {{ .Values.logLevel | quote }}
+              value: {{ required "logLevel is required" .Values.logLevel | quote }}
+            - name: FASTAPI_HOST
+              value: "0.0.0.0"
+            - name: FASTAPI_PORT
+              value: "8000"
+            - name: FASTAPI_WORKERS
+              value: {{ required "fastapiWorkers is required" .Values.fastapiWorkers | quote }}
+            - name: DEBUG
+              value: {{ required "debug is required" .Values.debug | quote }}
+            - name: ALLOWED_HOSTS
+              value: {{ required "allowedHosts is required" .Values.allowedHosts | quote }}
             - name: IDREPO_INPROCESS_FALLBACK
-              value: {{ .Values.mosip.inprocessFallback | quote }}
+              value: {{ required "mosip.inprocessFallback is required" .Values.mosip.inprocessFallback | quote }}
             - name: MOSIP_IDREPO_BASE_URL
               value: {{ required "mosip.idrepoBaseUrl is required" .Values.mosip.idrepoBaseUrl | quote }}
             - name: MOSIP_IDGENERATOR_BASE_URL
-              value: {{ .Values.mosip.idgeneratorBaseUrl | quote }}
+              value: {{ required "mosip.idgeneratorBaseUrl is required" .Values.mosip.idgeneratorBaseUrl | quote }}
             - name: MOSIP_HTTP_TIMEOUT
-              value: {{ .Values.mosip.httpTimeout | quote }}
+              value: {{ required "mosip.httpTimeout is required" .Values.mosip.httpTimeout | quote }}
             - name: MOSIP_HTTP_RETRIES
-              value: {{ .Values.mosip.httpRetries | quote }}
+              value: {{ required "mosip.httpRetries is required" .Values.mosip.httpRetries | quote }}
             - name: MOSIP_HTTP_BACKOFF_SECONDS
-              value: {{ .Values.mosip.httpBackoffSeconds | quote }}
+              value: {{ required "mosip.httpBackoffSeconds is required" .Values.mosip.httpBackoffSeconds | quote }}
             - name: ENROLL_SUCCESS_LIMIT
-              value: {{ .Values.mosip.enrollSuccessLimit | quote }}
+              value: {{ required "mosip.enrollSuccessLimit is required" .Values.mosip.enrollSuccessLimit | quote }}
             - name: KEYCLOAK_PUBLIC_URL
               value: {{ required "keycloak.url is required" .Values.keycloak.url | quote }}
             - name: KEYCLOAK_INTERNAL_URL
@@ -73,20 +87,39 @@ spec:
             - name: KEYCLOAK_URL
               value: {{ required "keycloak.url is required" .Values.keycloak.url | quote }}
             - name: KEYCLOAK_REALM
-              value: {{ .Values.keycloak.realm | quote }}
+              value: {{ required "keycloak.realm is required" .Values.keycloak.realm | quote }}
             - name: KEYCLOAK_ADMIN_CLIENT_ID
               value: {{ required "keycloak.adminClientId is required" .Values.keycloak.adminClientId | quote }}
             - name: IDREPO_CLIENT_ID
               value: {{ required "keycloak.idrepoClientId is required" .Values.keycloak.idrepoClientId | quote }}
-            - name: IDREPO_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "existingSecret is required" .Values.existingSecret }}
-                  key: IDREPO_CLIENT_SECRET
             - name: KEYCLOAK_OIDC_CLIENT_ID
-              value: {{ .Values.keycloak.oidcClientId | quote }}
+              value: {{ required "keycloak.oidcClientId is required" .Values.keycloak.oidcClientId | quote }}
             - name: KEYCLOAK_OIDC_REDIRECT_URI
               value: {{ required "keycloak.redirectUri is required" .Values.keycloak.redirectUri | quote }}
+            - name: REGISTER_ID_COOKIE_SECURE
+              value: {{ required "cookieSecure is required" .Values.cookieSecure | quote }}
+            - name: REGISTER_ID_OPERATOR_ROLE
+              value: {{ required "operatorRole is required" .Values.operatorRole | quote }}
+            - name: EMAIL_PROVIDER
+              value: {{ include "register-id.requiredEnv" (dict "message" "email.provider is required" "value" .Values.email.provider) | quote }}
+            - name: EMAIL_FROM
+              value: {{ include "register-id.requiredEnv" (dict "message" "email.from is required" "value" .Values.email.from) | quote }}
+            - name: SMTP_HOST
+              value: {{ include "register-id.requiredEnv" (dict "message" "smtp.host is required" "value" .Values.smtp.host) | quote }}
+            - name: SMTP_PORT
+              value: {{ required "smtp.port is required" .Values.smtp.port | quote }}
+            - name: SMTP_USER
+              value: {{ include "register-id.requiredEnv" (dict "message" "smtp.user is required" "value" .Values.smtp.user) | quote }}
+            - name: SMTP_STARTTLS
+              value: {{ required "smtp.starttls is required" .Values.smtp.starttls | quote }}
+            {{- $secretName := required "existingSecret is required" .Values.existingSecret }}
+            {{- range $key := list "REDIS_URL" "APPLICATION_STORE_KEY" "DJANGO_SECRET_KEY" "IDREPO_CLIENT_SECRET" "KEYCLOAK_ADMIN_CLIENT_SECRET" "KEYCLOAK_OIDC_CLIENT_SECRET" "REGISTER_ID_OPERATOR_TOKEN" "EMAIL_PASSWORD" "SMTP_PASSWORD" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $key }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

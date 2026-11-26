@@ -30,6 +30,15 @@ app.kubernetes.io/name: {{ include "register-id.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{/*
+Non-empty chart value. The literal off is rendered as an empty string so mail
+can stay disabled: the process skips sending when the provider and host are empty.
+*/}}
+{{- define "register-id.requiredEnv" -}}
+{{- $value := required .message .value -}}
+{{- if ne $value "off" }}{{ $value }}{{ end -}}
+{{- end -}}
+
 {{- define "register-id.image" -}}
 {{- printf "%s/%s@%s" .Values.image.registry .Values.image.repository (required "image.digest is required" .Values.image.digest) -}}
 {{- end -}}

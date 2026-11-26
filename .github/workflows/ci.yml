@@ -140,11 +140,34 @@ jobs:
             --kube-version 1.28.9 \
             --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             --set publicHost.domain=sandbox.example.net \
+            --set projectName=register-id \
+            --set environment=dev \
+            --set buildVersion=0.1.0 \
+            --set logLevel=INFO \
+            --set debug=false \
+            --set allowedHosts=register.sandbox.example.net \
+            --set fastapiWorkers=1 \
+            --set cookieSecure=true \
+            --set operatorRole=reader \
             --set mosip.idrepoBaseUrl=http://id-repository \
+            --set mosip.idgeneratorBaseUrl=http://idgenerator.kernel \
+            --set mosip.inprocessFallback=false \
+            --set mosip.enrollSuccessLimit=100 \
+            --set mosip.httpTimeout=10 \
+            --set mosip.httpRetries=2 \
+            --set mosip.httpBackoffSeconds=0.5 \
             --set keycloak.url=https://iam.sandbox.example.net/auth \
             --set keycloak.internalUrl=http://keycloak.keycloak/auth \
+            --set keycloak.realm=mosip \
             --set keycloak.idrepoClientId=idrepo-client \
             --set keycloak.adminClientId=register-id \
+            --set keycloak.oidcClientId=register-id \
             --set keycloak.redirectUri=https://register.sandbox.example.net/api/login/callback \
+            --set email.provider=off \
+            --set email.from=off \
+            --set smtp.host=off \
+            --set smtp.port=587 \
+            --set smtp.user=off \
+            --set smtp.starttls=true \
             --set existingSecret=register-id \
             | grep -q 'register-id.mosip.io/host: "register.sandbox.example.net"'

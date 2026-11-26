@@ -50,8 +50,7 @@ flowchart TD
 
 1. **Branching Model**:
    - **`dev` (Default)**: Daily development and feature branches fork/merge here. Pushes do not auto-deploy.
-   - **`stg`**: Staging branch. Promoted via PR from `dev` (`bash scripts/release.sh pr stg`). Merging triggers automated deployment to `staging`.
-   - **`main`**: Production branch. Promoted via PR from `stg` (`bash scripts/release.sh pr main`). Merging triggers automated deployment to `production`.
+   - **`stg`** and **`main`**: Promotion PRs (`bash scripts/release.sh pr stg` / `pr main`). A Kit environment is installed from the [deployment manual](docs/deployment-manual.md). Merging those branches still runs the legacy SSH host workflow described in [`docs/deployment.md`](docs/deployment.md).
    - Docker Compose is for local development. Staging and production are the Helm chart in [`helm/register-id`](helm/register-id). The Sandbox Kit owns ingress.
 2. **Release & GHCR**: Releases are cut from `dev` using `bash scripts/release.sh vX.Y.Z`. Pushing the tag triggers CI tests and builds/pushes Docker images to GitHub Container Registry (`ghcr.io/mosip-asia/dpi-register-id`).
 3. **Configuration**: Strictly one [`.env.example`](.env.example) template. Local setup is `cp .env.example .env`.
@@ -126,7 +125,8 @@ Technical details, architecture specifications, and implementation schedules are
 - **[Objectives & Weekly Milestones](docs/objectives-and-milestones.md)**: Implementation goals, system architecture, RACI matrix, and 8-week delivery milestones (Weeks 1–8).
 - **[Business Requirements](docs/business-requirements.pdf)**: Accessibility, security, modularity, and standardization, plus the enroll and 1:1 walkthrough of the [current system diagram](docs/diagrams/current-system.pdf). Source: [`docs/business-requirements.tex`](docs/business-requirements.tex).
 - **[Citizen Portal Technology](docs/tech-stack.pdf)**: Vite, React, TanStack Router, pnpm, and the branding kit, and which business requirement each part of the portal carries. Source: [`docs/tech-stack.tex`](docs/tech-stack.tex).
-- **[CI/CD & Deployment Guide](docs/deployment.md)**: Local Docker Compose, optional Traefik overlay, and the Helm chart for staging and production. The Sandbox Kit owns ingress.
+- **[Deployment manual](docs/deployment-manual.md)**: What the Sandbox Kit must provide (IDRepo, idgenerator, Keycloak, Redis, optional SMTP), the Helm values, and how to check a deploy. Docker Compose is local only.
+- **[CI/CD notes](docs/deployment.md)**: Release tagging, the local Traefik overlay, and the legacy SSH/NetBird host deploy. Staging and production follow the deployment manual.
 - **[AI Agent Invariants (`AGENTS.md`)](AGENTS.md)**: Operational invariants and architectural guidelines for AI coding assistants.
 
 ### 🎓 Starter Foundation Tutorials (`docs/tutorial/`)
@@ -145,7 +145,8 @@ Technical details, architecture specifications, and implementation schedules are
 ├── data/                        # Local data directory (ignored by git)
 ├── docs/                        # Architecture, roadmap & deployment documentation
 │   ├── objectives-and-milestones.md # Core specification & 8-week delivery plan
-│   ├── deployment.md            # Local Compose, optional Traefik overlay, Helm for staging and production
+│   ├── deployment-manual.md     # Kit deploy: MOSIP, Keycloak, Helm values, and checks
+│   ├── deployment.md            # Release notes and the legacy SSH/NetBird host deploy
 │   └── tutorial/                # Foundation tutorials (FastAPI, Celery, Django)
 ├── logs/                        # Application logs (ignored by git)
 ├── models/                      # Model checkpoints and weights (ignored by git)

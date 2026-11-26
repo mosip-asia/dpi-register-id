@@ -34,37 +34,63 @@ publicHost:
   ## Full host. When set, hostname and domain are ignored.
   host: ""
 
-environment: dev
-logLevel: INFO
+## Every value below is empty until the deploy sets it. The Deployment
+## fails the render when any of them is missing.
+projectName: ""
+environment: ""
+buildVersion: ""
+logLevel: ""
+debug: ""
+allowedHosts: ""
+fastapiWorkers: ""
+## true or false. The app does not infer this from ENVIRONMENT.
+cookieSecure: ""
+## reader or custodian.
+operatorRole: ""
 
 ## Non-secret MOSIP endpoints. Secrets stay in existingSecret.
 mosip:
   idrepoBaseUrl: ""
-  httpTimeout: "10"
-  httpRetries: "2"
-  httpBackoffSeconds: "0.5"
-  idgeneratorBaseUrl: "http://idgenerator.kernel"
-  inprocessFallback: "false"
-  enrollSuccessLimit: "100"
+  httpTimeout: ""
+  httpRetries: ""
+  httpBackoffSeconds: ""
+  idgeneratorBaseUrl: ""
+  ## false on a Kit deploy. true is the local mock path.
+  inprocessFallback: ""
+  enrollSuccessLimit: ""
 
 keycloak:
   ## Browser host, iam.<domain>. url and internalUrl must both be set and should differ.
   url: ""
   ## In-cluster host for token and admin calls. Must be set with url, and should differ from it.
   internalUrl: ""
-  realm: mosip
+  realm: ""
   adminClientId: ""
   ## Confidential client for the IDRepo service token. No default.
   ## IDREPO_CLIENT_SECRET is a key in existingSecret, never a value in this file.
   idrepoClientId: ""
-  oidcClientId: register-id
+  oidcClientId: ""
   ## https://register.<domain>/api/login/callback
   redirectUri: ""
 
+## Mail. Required. Use off to leave the container value empty, which skips sending.
+## A real provider, sender, host, or user is passed through unchanged.
+email:
+  provider: ""
+  from: ""
+smtp:
+  host: ""
+  port: ""
+  user: ""
+  starttls: ""
+
 ## Secret keys the Kit supplies. The chart does not render secret values.
+## Each key below is a required secretKeyRef. The value may be empty when the
+## feature is off (OIDC public client, operator token, mail password).
+## REDIS_URL, APPLICATION_STORE_KEY, DJANGO_SECRET_KEY,
 ## IDREPO_CLIENT_SECRET, KEYCLOAK_ADMIN_CLIENT_SECRET,
-## KEYCLOAK_OIDC_CLIENT_SECRET, REDIS_URL, DJANGO_SECRET_KEY,
-## APPLICATION_STORE_KEY, REGISTER_ID_OPERATOR_TOKEN, EMAIL_PASSWORD
+## KEYCLOAK_OIDC_CLIENT_SECRET, REGISTER_ID_OPERATOR_TOKEN,
+## EMAIL_PASSWORD, SMTP_PASSWORD
 existingSecret: ""
 
 ## Extra environment entries, each {name, value} or {name, valueFrom}.

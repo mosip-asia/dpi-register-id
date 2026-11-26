@@ -226,28 +226,35 @@ class IDRepoClient:
         self._token: str | None = None
         self._token_until: float = 0.0
 
-    def _auth_configured(self) -> bool:
-        return bool(
-            os.getenv("KEYCLOAK_INTERNAL_URL", "").strip()
-            and os.getenv("IDREPO_CLIENT_ID", "").strip()
-            and os.getenv("IDREPO_CLIENT_SECRET", "").strip()
-        )
+    def _note_token_failure(self, message: str, status: int) -> None:
+        """Remember why the IDRepo token step failed. The message is for logs, not the citizen."""
+        self.last_error = message
+        self.last_status = status
 
     def _mosip_token(self) -> str | None:
         """Keycloak client_credentials token for IDRepo. The secret and token are not logged."""
-        if not self._auth_configured():
+        client_id = os.getenv("IDREPO_CLIENT_ID", "").strip()
+        client_secret = os.getenv("IDREPO_CLIENT_SECRET", "").strip()
+        if not client_id or not client_secret:
+            self._note_token_failure(
+                "No IDRepo token: IDREPO_CLIENT_ID / IDREPO_CLIENT_SECRET is not set",
+                503,
+            )
+            return None
+        internal = os.getenv("KEYCLOAK_INTERNAL_URL", "").strip()
+        if not internal:
+            self._note_token_failure("Keycloak unreachable at KEYCLOAK_INTERNAL_URL", 503)
             return None
         now = time.monotonic()
         if self._token and now < self._token_until:
             return self._token
 
-        base = os.environ["KEYCLOAK_INTERNAL_URL"].rstrip("/")
         realm = os.getenv("KEYCLOAK_REALM", "").strip() or "mosip"
-        url = f"{base}/realms/{realm}/protocol/openid-connect/token"
+        url = f"{internal.rstrip('/')}/realms/{realm}/protocol/openid-connect/token"
         form = {
             "grant_type": "client_credentials",
-            "client_id": os.environ["IDREPO_CLIENT_ID"],
-            "client_secret": os.environ["IDREPO_CLIENT_SECRET"],
+            "client_id": client_id,
+            "client_secret": client_secret,
         }
         # A token POST is not retried on an HTTP error. One extra attempt covers a lost connection.
         response = None
@@ -260,22 +267,31 @@ class IDRepoClient:
                     if delay:
                         time.sleep(delay)
                     continue
-                logger.warning("Keycloak token endpoint unreachable")
+                self._note_token_failure("Keycloak unreachable at KEYCLOAK_INTERNAL_URL", 503)
                 return None
             else:
                 break
-        if response is None or response.status_code != 200:
-            status = getattr(response, "status_code", "unreachable")
-            logger.warning("Keycloak token endpoint returned status %s", status)
+        if response is None:
+            self._note_token_failure("Keycloak unreachable at KEYCLOAK_INTERNAL_URL", 503)
+            return None
+        if response.status_code == 401:
+            self._note_token_failure("Keycloak rejected the IDRepo client (401)", 502)
+            return None
+        if response.status_code == 404:
+            self._note_token_failure(f"Keycloak realm '{realm}' not found", 502)
+            return None
+        if response.status_code != 200:
+            status = 502 if response.status_code < 500 else 503
+            self._note_token_failure(f"Keycloak token endpoint returned status {response.status_code}", status)
             return None
         try:
             data = response.json()
         except ValueError:
-            logger.warning("Keycloak token response was not JSON")
+            self._note_token_failure("Keycloak token response was not JSON", 502)
             return None
         token = data.get("access_token") if isinstance(data, dict) else None
         if not token:
-            logger.warning("Keycloak token response did not include an access token")
+            self._note_token_failure("Keycloak token response did not include an access token", 502)
             return None
         expires_in = data.get("expires_in") if isinstance(data, dict) else None
         try:
@@ -400,10 +416,14 @@ class IDRepoClient:
         Allocate a UIN from the kernel idgenerator. A failed call does not invent a number.
         """
         self.last_status = None
+        self.last_error = None
         # Production must present the IDRepo service token. No cookie, no invented UIN.
+        # A token failure is not an idgenerator failure: keep the reason _mosip_token recorded.
         if not self.enable_inprocess_fallback and not self._mosip_token():
-            self.last_status = 503
-            self.last_error = "MOSIP idgenerator did not return a UIN"
+            if self.last_status not in (502, 503):
+                self.last_status = 503
+            if not self.last_error:
+                self.last_error = "No IDRepo token: IDREPO_CLIENT_ID / IDREPO_CLIENT_SECRET is not set"
             return ""
 
         base = self._idgenerator_base()

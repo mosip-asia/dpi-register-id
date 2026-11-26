@@ -330,6 +330,7 @@ def _audit(
     app_code: str | None = None,
     session_id: str | None = None,
     request: Request | None = None,
+    request_id: str | None = None,
 ) -> None:
     """Append one user-action row. A second application log line is not written."""
     if request is not None:
@@ -345,7 +346,7 @@ def _audit(
         "detail": detail,
         "eventId": uuid.uuid4().hex,
         "service": "portal",
-        "requestId": uuid.uuid4().hex,
+        "requestId": request_id or uuid.uuid4().hex,
     }
     if request is not None:
         event["source"] = _source_label(request)
@@ -1108,10 +1109,19 @@ def check_liveness_endpoint(req: LivenessRequest):
     return evaluate_liveness(req)
 
 
+def _citizen_id_failure(request_id: str) -> str:
+    """Plain enrolment failure. The reference matches the log line. No service names."""
+    return (
+        "We couldn't create your ID right now. Please try again later. "
+        f"Reference: {request_id}"
+    )
+
+
 def _mosip_failure(idrepo: IDRepoClient, uin: str, req: EnrollRequest, request: Request | None) -> HTTPException:
     status = idrepo.last_status if idrepo.last_status in (502, 503) else 502
-    error_msg = idrepo.last_error or "Failed to persist identity in MOSIP IDRepo"
-    logger.error("Enrollment failed in IDRepo")
+    request_id = uuid.uuid4().hex
+    reason = idrepo.last_error or "Failed to persist identity in MOSIP IDRepo"
+    logger.error("request_id=%s %s", request_id, reason)
     _audit(
         "enroll",
         "citizen",
@@ -1123,11 +1133,12 @@ def _mosip_failure(idrepo: IDRepoClient, uin: str, req: EnrollRequest, request: 
         event_name="enroll",
         session_id=_enroll_session(req),
         request=request,
+        request_id=request_id,
     )
     headers = {"Retry-After": "30"} if status == 503 else None
     return HTTPException(
         status_code=status,
-        detail=f"MOSIP IDRepo enrollment failed: {error_msg}",
+        detail=_citizen_id_failure(request_id),
         headers=headers,
     )
 

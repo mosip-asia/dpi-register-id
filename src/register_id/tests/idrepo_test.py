@@ -405,6 +405,7 @@ def test_generate_uin_without_fallback_does_not_invent_a_uin(monkeypatch):
     client = IDRepoClient(base_url="http://idrepo.test", enable_inprocess_fallback=False)
     assert client.generate_uin() == ""
     assert client.last_status == 503
+    assert client.last_error == "No IDRepo token: IDREPO_CLIENT_ID / IDREPO_CLIENT_SECRET is not set"
     assert called == []
 
 
@@ -438,6 +439,7 @@ def test_generate_uin_without_fallback_calls_kernel_not_idrepo(monkeypatch):
     client = IDRepoClient(base_url="http://idrepo.test", enable_inprocess_fallback=False)
     assert client.generate_uin() == ""
     assert client.last_status == 503
+    assert client.last_error == "MOSIP idgenerator did not return a UIN"
     assert seen["url"] == "http://idgenerator.kernel/v1/idgenerator/uin"
     assert seen["cookie"] == "Authorization=tok-1"
     assert "idrepo.test" not in seen["url"]

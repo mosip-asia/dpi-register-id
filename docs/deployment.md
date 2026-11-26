@@ -1,6 +1,8 @@
-# CI/CD, Deployment & Traefik Overlay
+# CI/CD notes and legacy host deploy
 
-This document describes local Docker Compose, the optional Traefik overlay, and the Helm chart. Docker Compose is for local development. Staging and production are the Helm chart. The Sandbox Kit owns ingress.
+Install and configure Register ID from the [deployment manual](deployment-manual.md). That is the Sandbox Kit path: Helm, MOSIP, Keycloak, and Redis. This file keeps the release steps, the local Traefik overlay, and the old SSH/NetBird host deploy.
+
+**Do not follow sections 2 or 5 for a Kit environment.** Those sections are the legacy path that SSHed to a server over NetBird and rolled the host back with `.deploy_success`. The Kit installs [`helm/register-id`](../helm/register-id) and owns ingress.
 
 ---
 
@@ -9,11 +11,11 @@ This document describes local Docker Compose, the optional Traefik overlay, and 
 ```
 [feature/xxx] ---> [dev] (tag vX.Y.Z -> CI builds & pushes to GHCR)
                     │
-                    ▼ (PR merge)
-                  [stg] (CD deploys to Staging)
+                    ▼ (PR merge, legacy host deploy)
+                  [stg]
                     │
-                    ▼ (PR merge)
-                  [main] (CD deploys to Production)
+                    ▼ (PR merge, legacy host deploy)
+                  [main]
 ```
 
 1. **Development (`dev`)**:
@@ -22,18 +24,20 @@ This document describes local Docker Compose, the optional Traefik overlay, and 
 2. **Release to GHCR (`v*`)**:
    - Cut release: `bash scripts/release.sh vX.Y.Z`.
    - Pushing the tag triggers `.github/workflows/ci.yml`, running tests and pushing images (`vX.Y.Z`, `vX.Y`, `latest`) to GitHub Container Registry (`ghcr.io`).
-3. **Staging Promotion (`stg`)**:
+3. **Staging Promotion (`stg`)** — legacy host deploy:
    - Open PR: `bash scripts/release.sh pr stg` (or `gh pr create --base stg --head dev`).
-   - Merging into `stg` automatically deploys to the Staging server.
-4. **Production Promotion (`main`)**:
+   - Merging into `stg` runs the legacy workflow, which SSHes to a server. A Kit environment does not use that path. Install the Helm chart from the [deployment manual](deployment-manual.md).
+4. **Production Promotion (`main`)** — legacy host deploy:
    - Open PR: `bash scripts/release.sh pr main` (or `gh pr create --base main --head stg`).
-   - Merging into `main` automatically deploys to the Production server.
+   - Merging into `main` runs the same legacy workflow. A Kit environment does not use that path.
 
 ---
 
-## 2. GitHub Environments & Credentials
+## 2. GitHub Environments & Credentials (legacy)
 
-Configure two environments in GitHub (**Settings > Environments**): `staging` and `production`. Both execute the exact same deployment job in `.github/workflows/cd.yml`.
+**Legacy.** This is the SSH/NetBird host deploy. The Sandbox Kit does not use these secrets. Configure the chart with the [deployment manual](deployment-manual.md).
+
+The old workflow expected two GitHub environments, `staging` and `production`, and ran `.github/workflows/cd.yml` for both.
 
 | Variable / Secret | Type | Description |
 |---|---|---|
@@ -70,14 +74,16 @@ Docker Compose layers [`docker-compose.traefik.yml`](../docker-compose.traefik.y
 
 ## 4. Sandbox Kit (Helm)
 
-The Sandbox Kit installs only Helm charts and pins every image by digest. Chart sources are in [`helm/register-id`](../helm/register-id). Docker Compose is for local development. Staging and production are this Helm chart. The Kit owns ingress.
+Follow the [deployment manual](deployment-manual.md) for values, secrets, and checks. The short version: the Sandbox Kit installs only Helm charts and pins every image by digest. Chart sources are in [`helm/register-id`](../helm/register-id). Docker Compose is for local development. The Kit owns ingress.
 
 The public host is one label under the environment domain: `register.<domain>`. CI still pushes `ghcr.io/mosip-asia/dpi-register-id` and writes `ghcr.io/mosip-asia/dpi-register-id@sha256:…` in the job summary and the `image-digest` artifact. The Kit cannot pull that package anonymously. Mirror the image to Docker Hub or another registry the Kit can pull, then set `image.registry`, `image.repository`, and `image.digest` to the mirrored digest. The workflow does not change GHCR package visibility.
 
 `/health` is the liveness probe. `/ready` checks Redis and that configuration is loaded. It does not call IDRepo. The process logs to stdout and runs as uid 1000. IDRepo calls use a Keycloak `client_credentials` token (`IDREPO_CLIENT_ID` / `IDREPO_CLIENT_SECRET`) sent as `Cookie: Authorization`. Keycloak admin calls use only a realm service account (`KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET`). `KEYCLOAK_PUBLIC_URL` is the browser host and `KEYCLOAK_INTERNAL_URL` is the in-cluster host.
 
-## 5. Fail-Forward Policy & Rollback
+## 5. Fail-Forward Policy & Rollback (legacy)
 
-- **Smoke Testing**: Every deployment executes `scripts/smoke-test.sh` verifying `/health`, index route, and Django checks before declaring success.
+**Legacy.** This rollback applies to the SSH host deploy, not to a Kit install. The Kit rolls a release back by installing the previous image digest.
+
+- **Smoke Testing**: The legacy host workflow runs `scripts/smoke-test.sh`, which checks `/health`, the index route, and Django before declaring success.
 - **Persistent Baseline (`.deploy_success`)**: The deployed commit SHA is saved in `.deploy_success` only after tests pass.
 - **Zero-Touch Rollback**: If deployment or smoke tests fail, the workflow immediately checks out the previous verified SHA from `.deploy_success` and redeploys it, restoring the host to a stable baseline.
