@@ -769,3 +769,28 @@ def test_configured_redis_is_required_for_the_enroll_limit(monkeypatch):
     monkeypatch.setattr(RedisEnrollLimiter, "__init__", use_down)
     with pytest.raises(EnrollLimitUnavailable):
         ensure_enroll_allowed(TEST_ENROLL_TOKEN)
+
+
+def test_enroll_refuses_values_the_mosip_identity_schema_rejects():
+    """The real IDRepo rejects these with KER-IOV-004 after a UIN is allocated; refuse them first."""
+    from pydantic import ValidationError
+
+    from register_id.models import EnrollRequest
+
+    base = {
+        "fullName": "Schema Rules", "email": "rules@example.org", "faceImage": "data:image/jpeg;base64,AA==",
+        "consent": {"accepted": True, "purpose": "Create a citizen ID and store the face image for this registration",
+                    "acceptedAt": 1795777000.0, "language": "eng"},
+    }
+    for field, bad in (("phone", "+66812345678"), ("phone", "081-234-5678"),
+                       ("referenceIdentityNumber", "12345"), ("referenceIdentityNumber", "AB12345678"),
+                       ("postalCode", "102000")):
+        try:
+            EnrollRequest.model_validate({**base, field: bad})
+        except ValidationError as exc:
+            assert field in str(exc)
+        else:
+            raise AssertionError(f"{field}={bad!r} was accepted")
+    ok = EnrollRequest.model_validate({**base, "phone": "0812345678", "referenceIdentityNumber": "1234567890",
+                                       "postalCode": "10200"})
+    assert ok.phone == "0812345678"

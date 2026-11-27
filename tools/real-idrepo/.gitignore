@@ -1,0 +1,10 @@
+idrepo.env
+objectstore-s3.json
+keystore/
+jars/
+biosdk-jars/
+db_scripts/
+seed/
+__pycache__/
+config/*
+!config/local*.properties

@@ -378,7 +378,9 @@ class IDRepoClient:
         return self._test_client
 
     def _now_iso(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        """MOSIP requesttime: yyyy-MM-ddTHH:mm:ss.SSSZ in UTC. The real IDRepo rejects other forms (IDR-IDC-002)."""
+        now = datetime.now(timezone.utc)
+        return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
     def _make_rid(self) -> str:
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -523,6 +525,17 @@ class IDRepoClient:
                 postal_code=postal_code,
                 reference_identity_number=reference_identity_number,
             )
+        if documents and "individualBiometrics" not in identity:
+            # MOSIP IDRepo rejects a document whose category is not also a key of the identity
+            # ("validateDocuments failed for individualBiometrics"). This is MOSIP's reference form.
+            identity = {
+                **identity,
+                "individualBiometrics": {
+                    "format": "cbeff",
+                    "version": 1.0,
+                    "value": "individualBiometrics_bio.cbeff",
+                },
+            }
         request_body: dict[str, Any] = {
             "registrationId": registration_id or self._make_rid(),
             "status": "ACTIVATED",
@@ -563,6 +576,14 @@ class IDRepoClient:
                 self.last_status = None
                 self.last_backend = "mosip-idrepo-rest"
                 return True
+            if self._earlier_attempt_saved(data, uin, full_name):
+                # A slow first attempt was saved, the client timed out and retried, and the retry
+                # got IDR-IDC-012. The UIN is allocated by this server for this attempt, so an
+                # existing record with the same UIN and name is this enrolment.
+                logger.info("IDRepo already holds this enrolment (IDR-IDC-012 on retry); treating as saved")
+                self.last_status = None
+                self.last_backend = "mosip-idrepo-rest"
+                return True
             remote_error = _enroll_failure_summary(r)
             self.last_status = 502
             logger.warning("IDRepo remote enroll failed: %s", remote_error)
@@ -600,22 +621,22 @@ class IDRepoClient:
 
     def get_identity(self, uin: str, include_biometrics: bool = False) -> dict[str, Any] | None:
         """
-        Retrieves a citizen identity from MOSIP IDRepo via GET /idrepository/v1/identity/uin/{uin}.
+        Retrieves a citizen identity via GET /idrepository/v1/identity/idvid/{uin} (MOSIP IDRepo 1.2).
 
-        Ordinary reads omit face_image and cbeff_xml. A custodian read passes
-        include_biometrics=True. Name, email, status, and the login flag stay.
+        type=demo returns demographics; type=all adds documents (CBEFF) for a custodian read.
+        Ordinary reads omit face_image and cbeff_xml. Name, email, status, and the login flag stay.
+        MOSIP answers HTTP 200 with an `errors` list when the UIN is unknown, so errors mean not found.
         """
-        params = {"includeBiometrics": "true" if include_biometrics else "false"}
+        params = {"type": "all" if include_biometrics else "demo", "idType": "UIN"}
+        path = f"/idrepository/v1/identity/idvid/{uin}"
 
         # 1. Attempt remote HTTP call
         try:
-            r = self._send(
-                "GET",
-                f"{self.base_url}/idrepository/v1/identity/uin/{uin}",
-                params=params,
-            )
+            r = self._send("GET", f"{self.base_url}{path}", params=params)
             if r is not None and r.status_code == 200:
-                return _record_from_read_response(r.json(), uin, include_biometrics)
+                data = r.json()
+                if not data.get("errors") and data.get("response"):
+                    return _record_from_read_response(data, uin, include_biometrics)
         except Exception as e:
             logger.debug(f"IDRepo remote get failed: {e}")
 
@@ -623,7 +644,7 @@ class IDRepoClient:
         if self.enable_inprocess_fallback:
             try:
                 client = self._get_test_client()
-                r = client.get(f"/idrepository/v1/identity/uin/{uin}", params=params)
+                r = client.get(path, params=params)
                 if r.status_code == 200:
                     self.last_status = None
                     return _record_from_read_response(r.json(), uin, include_biometrics)
@@ -641,16 +662,25 @@ class IDRepoClient:
         no templates (or both calls failed).
         """
         params = {"includeBiometrics": "true"}
+        reached = False
         try:
             r = self._send(
                 "GET",
                 f"{self.base_url}/ida/v1/face-template/uin/{uin}",
                 params=params,
             )
+            reached = r is not None
             if r is not None and r.status_code == 200:
                 return _templates_from_body(r.json())
         except Exception as e:
             logger.debug(f"IDRepo remote face-template get failed: {e}")
+
+        # A real MOSIP IDRepo has no template endpoint (404). The descriptors are stored in the
+        # CBEFF's `others` entries at enrolment, so read the biometric document instead.
+        if reached:
+            rows = self._templates_from_cbeff(uin)
+            if rows:
+                return rows
 
         if self.enable_inprocess_fallback:
             try:
@@ -663,6 +693,26 @@ class IDRepoClient:
                 logger.error(f"In-process IDRepo fallback face-template get failed: {e}")
 
         return []
+
+    def _earlier_attempt_saved(self, data: dict[str, Any], uin: str, full_name: str) -> bool:
+        """True when IDRepo refused a create with IDR-IDC-012 because this same enrolment is already stored."""
+        errors = data.get("errors") or []
+        codes = {err.get("errorCode") for err in errors if isinstance(err, dict)}
+        if "IDR-IDC-012" not in codes:
+            return False
+        existing = self.get_identity(uin)
+        return bool(existing) and (existing.get("full_name") or "").strip() == (full_name or "").strip()
+
+    def _templates_from_cbeff(self, uin: str) -> list[dict[str, Any]]:
+        """Match vectors from the stored CBEFF (see cbeff.build_cbeff_xml descriptors)."""
+        from register_id.cbeff import descriptors_from_cbeff
+
+        record = self.get_identity(uin, include_biometrics=True)
+        cbeff_xml = (record or {}).get("cbeff_xml") or ""
+        return [
+            {"sector": "front", "engine": "face-api-128", "embedding": vector}
+            for vector in descriptors_from_cbeff(cbeff_xml)
+        ]
 
     def list_identities(self, limit: int = 50) -> list[dict[str, Any]]:
         """

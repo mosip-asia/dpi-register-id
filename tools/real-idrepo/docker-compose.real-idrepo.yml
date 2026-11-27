@@ -1,0 +1,7 @@
+# Overlay: point register-id's app at the REAL MOSIP ID Repository (idrepo-real, started by
+# 10-run-idrepo.sh) instead of the mock. UINs still come from the mock generator, which now follows
+# MOSIP's UIN rules. Turn on/off with COMPOSE_FILE in register-id's .env (see MANUAL.md section 9).
+services:
+  app:
+    environment:
+      MOSIP_IDREPO_BASE_URL: "http://idrepo-real:8090"

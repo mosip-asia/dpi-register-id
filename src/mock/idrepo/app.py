@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from mock.idrepo.storage import IDRepoStorage
+from mock.idrepo.uin import new_uin
 
 logger = logging.getLogger(__name__)
 
@@ -136,9 +137,10 @@ def health_check():
 @idrepo_app.get("/v1/idgenerator/uin")
 def generate_uin():
     """
-    Generates a fresh 10-digit citizen UIN conforming to MOSIP specifications.
+    Generates a fresh 10-digit citizen UIN that passes MOSIP's UIN validator (see mock/idrepo/uin.py),
+    so a real MOSIP ID Repository accepts it too.
     """
-    uin = str(random.randint(2000000000, 9999999999))
+    uin = new_uin()
     return {
         "id": "mosip.idgenerator.uin",
         "version": "v1",
@@ -268,6 +270,18 @@ def add_identity(payload: dict):
         },
         "errors": None,
     }
+
+
+@idrepo_app.get("/idrepository/v1/identity/idvid/{id}")
+def get_identity_by_idvid(id: str, type: str = "demo", idType: str = "UIN"):
+    """
+    MOSIP IDRepo 1.2 retrieve endpoint (the path the real ID Repository serves).
+
+    type=demo returns demographics; type=bio or type=all also returns face image and CBEFF.
+    Only UINs are stored here, so idType is accepted and not used.
+    """
+    del idType
+    return get_identity_by_uin(id, includeBiometrics=type.lower() in ("bio", "all"))
 
 
 @idrepo_app.get("/idrepository/v1/identity/uin/{uin}")
