@@ -84,8 +84,10 @@ def test_enroll_returns_502_when_idrepo_write_fails(monkeypatch):
         },
     )
     assert res.status_code == 502
-    assert "MOSIP IDRepo" in res.json()["detail"]
-    assert "connection refused" in res.json()["detail"]
+    detail = res.json()["detail"]
+    assert "Reference:" in detail
+    assert "MOSIP" not in detail
+    assert "connection refused" not in detail
     assert "faceImage" not in res.text
     stored = IDRepoClient(
         base_url="http://127.0.0.1:9",
