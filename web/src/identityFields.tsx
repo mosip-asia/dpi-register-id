@@ -1,5 +1,30 @@
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Rules from MOSIP's identity schema (mosip-data v1.2.0.1 identity_schema validators). The real ID
+// Repository rejects values that break them (KER-IOV-004), so the portal checks them before submit.
+const RULES: Partial<Record<string, { test: RegExp; hint: string }>> = {
+  fullName: { test: /^.{3,50}$/, hint: "Use 3 to 50 characters." },
+  phone: { test: /^\+?\d{10}$/, hint: "Use exactly 10 digits, for example 0812345678. No spaces or country code." },
+  referenceIdentityNumber: { test: /^\d{10,30}$/, hint: "Use 10 to 30 digits, numbers only." },
+  postalCode: { test: /^([A-Za-z0-9]{5}|NA)$/, hint: "Use 5 letters or digits, or NA." },
+  addressLine1: { test: /^.{0,50}$/, hint: "Use at most 50 characters." },
+  addressLine2: { test: /^.{0,50}$/, hint: "Use at most 50 characters." },
+  addressLine3: { test: /^.{0,50}$/, hint: "Use at most 50 characters." },
+  city: { test: /^.{0,50}$/, hint: "Use at most 50 characters." },
+  province: { test: /^.{0,50}$/, hint: "Use at most 50 characters." },
+  region: { test: /^.{0,50}$/, hint: "Use at most 50 characters." },
+};
+
+/** The hint to show when a filled value breaks the identity schema, or null when it is fine. */
+export function fieldProblem(field: string, value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  // Email keeps its own message on the Details and FixDetail screens.
+  if (field === "email") return null;
+  const rule = RULES[field];
+  return rule && !rule.test.test(trimmed) ? rule.hint : null;
+}
+
 export const detailFields = [
   "fullName",
   "dateOfBirth",
@@ -39,7 +64,7 @@ export const fieldMeta: Record<CitizenField, FieldMeta> = {
   dateOfBirth: { label: "Date of birth", optional: false, input: "date", autoComplete: "bday" },
   gender: { label: "Gender", optional: false, input: "text" },
   email: { label: "Email", optional: false, input: "email", autoComplete: "email", maxLength: 128 },
-  phone: { label: "Phone number", optional: false, input: "tel", autoComplete: "tel", maxLength: 32 },
+  phone: { label: "Phone number", optional: false, input: "tel", autoComplete: "tel", maxLength: 11 },
   referenceIdentityNumber: {
     label: "Reference ID number",
     optional: false,
@@ -94,6 +119,7 @@ export function emailOk(email: string) {
 }
 
 export function fieldOk(field: CitizenField, value: string) {
+  if (fieldProblem(field, value)) return false;
   if (field === "email") return emailOk(value);
   if (fieldMeta[field].optional) return true;
   return filled(value);
@@ -128,7 +154,8 @@ export function IdentityField({
   onChange: (value: string) => void;
 }) {
   const meta = fieldMeta[field];
-  const invalid = field === "email" && emailInvalid(value);
+  const problem = fieldProblem(field, value);
+  const invalid = problem !== null;
   const label = meta.optional ? `${meta.label} (optional)` : meta.label;
 
   return (
@@ -149,9 +176,15 @@ export function IdentityField({
           autoComplete={meta.autoComplete}
           maxLength={meta.maxLength}
           aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? `hint-${field}` : undefined}
           onChange={(event) => onChange(event.target.value)}
         />
       )}
+      {problem ? (
+        <span id={`hint-${field}`} className="note" role="alert">
+          {problem}
+        </span>
+      ) : null}
     </label>
   );
 }

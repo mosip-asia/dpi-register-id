@@ -1165,7 +1165,9 @@ def _identity_for(req: EnrollRequest, uin: str) -> dict[str, Any]:
 
 def _cbeff_for(req: EnrollRequest, uin: str) -> str:
     jpeg_bytes = extract_jpeg_bytes(req.faceImage)
-    return build_cbeff_xml(uin=uin, jpeg_bytes=jpeg_bytes)
+    # The face-api descriptors travel inside the CBEFF so a real MOSIP IDRepo (which has no
+    # template endpoint) still holds what verify compares against.
+    return build_cbeff_xml(uin=uin, jpeg_bytes=jpeg_bytes, descriptors=req.faceDescriptors)
 
 
 def _store_identity(

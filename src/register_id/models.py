@@ -2,6 +2,7 @@
 Pydantic data models for the register_id submodule.
 """
 
+import re
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -125,6 +126,33 @@ class ClientLiveness(BaseModel):
     sweepYaws: list[SweepYaw] = Field(..., min_length=5, max_length=5)
 
 
+# Field rules from MOSIP's identity schema (mosip-data v1.2.0.1). The real ID Repository rejects a value
+# that breaks them (KER-IOV-004) after the UIN is allocated, so they are checked here first.
+# Empty values are left to the schema's required list, which IDRepo enforces.
+_IDENTITY_RULES: tuple[tuple[str, str, str], ...] = (
+    ("fullName", r"^.{3,50}$", "fullName must be 3 to 50 characters"),
+    ("phone", r"^\+?\d{10}$", "phone must be exactly 10 digits, optionally starting with +"),
+    ("referenceIdentityNumber", r"^\d{10,30}$", "referenceIdentityNumber must be 10 to 30 digits"),
+    ("postalCode", r"^([A-Za-z0-9]{5}|NA)$", "postalCode must be 5 letters or digits, or NA"),
+    ("addressLine1", r"^.{0,50}$", "addressLine1 must be at most 50 characters"),
+    ("addressLine2", r"^.{0,50}$", "addressLine2 must be at most 50 characters"),
+    ("addressLine3", r"^.{0,50}$", "addressLine3 must be at most 50 characters"),
+    ("city", r"^.{0,50}$", "city must be at most 50 characters"),
+    ("province", r"^.{0,50}$", "province must be at most 50 characters"),
+    ("region", r"^.{0,50}$", "region must be at most 50 characters"),
+)
+
+
+def _check_identity_rules(req: "EnrollRequest") -> None:
+    problems = [
+        message
+        for field, pattern, message in _IDENTITY_RULES
+        if (value := str(getattr(req, field, "") or "").strip()) and not re.fullmatch(pattern, value)
+    ]
+    if problems:
+        raise ValueError("; ".join(problems))
+
+
 class EnrollRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -168,6 +196,7 @@ class EnrollRequest(BaseModel):
         if self.faceDescriptors is not None and self.faceViews is not None:
             raise ValueError("faceViews cannot be combined with faceDescriptors")
         self.consent = validate_consent(self.consent)
+        _check_identity_rules(self)
         return self
 
 

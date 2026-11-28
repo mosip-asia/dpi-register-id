@@ -443,3 +443,123 @@ def test_generate_uin_without_fallback_calls_kernel_not_idrepo(monkeypatch):
     assert seen["url"] == "http://idgenerator.kernel/v1/idgenerator/uin"
     assert seen["cookie"] == "Authorization=tok-1"
     assert "idrepo.test" not in seen["url"]
+
+
+def test_get_identity_uses_the_mosip_idvid_path():
+    """MOSIP IDRepo 1.2 serves reads at /idvid/{id}; /uin/{uin} exists only in the mock."""
+    client = IDRepoClient(base_url="http://127.0.0.1:9", enable_inprocess_fallback=True)
+    uin = client.generate_uin()
+    assert client.add_identity(uin=uin, full_name="Idvid Reader", email="idvid@example.org",
+                               face_image="data:image/jpeg;base64,bW9jay1mYWNl")
+
+    demo = mock_client.get(f"/idrepository/v1/identity/idvid/{uin}", params={"type": "demo", "idType": "UIN"})
+    assert demo.status_code == 200
+    assert "faceImage" not in demo.json()["response"]["identity"]
+
+    full = mock_client.get(f"/idrepository/v1/identity/idvid/{uin}", params={"type": "all"})
+    assert full.json()["response"]["identity"]["faceImage"] == "data:image/jpeg;base64,bW9jay1mYWNl"
+
+    assert client.get_identity(uin)["full_name"] == "Idvid Reader"
+
+
+def test_get_identity_treats_a_mosip_error_envelope_as_not_found(monkeypatch):
+    """The real IDRepo answers HTTP 200 with an errors list for an unknown UIN."""
+
+    class _Reply:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"response": None, "errors": [{"errorCode": "IDR-IDC-007", "message": "No Record(s) found"}]}
+
+    client = IDRepoClient(base_url="http://idrepo.example", enable_inprocess_fallback=False)
+    seen = {}
+
+    def fake_send(method, url, **kwargs):
+        seen["url"] = url
+        seen["params"] = kwargs.get("params")
+        return _Reply()
+
+    monkeypatch.setattr(client, "_send", fake_send)
+    assert client.get_identity("2459857015") is None
+    assert seen["url"] == "http://idrepo.example/idrepository/v1/identity/idvid/2459857015"
+    assert seen["params"] == {"type": "demo", "idType": "UIN"}
+
+
+def test_mock_generator_uins_pass_mosip_uin_rules():
+    """A real MOSIP ID Repository rejects UINs that break the kernel UIN validator (IDR-IDC-002)."""
+    from mock.idrepo.uin import checksum_digit, is_valid_uin
+
+    assert is_valid_uin("2459857015")
+    assert is_valid_uin("3623052180")
+    assert not is_valid_uin("5219473140")  # wrong checksum
+    assert not is_valid_uin("1459857015")  # starts with 1
+    assert not is_valid_uin("2345678901")  # ascending run
+    body = "245985701"
+    assert checksum_digit(body) == "5"
+    for _ in range(50):
+        uin = mock_client.get("/v1/idgenerator/uin").json()["response"]["uin"]
+        assert is_valid_uin(uin), uin
+
+
+def test_face_templates_fall_back_to_the_cbeff_when_idrepo_has_no_template_endpoint(monkeypatch):
+    """Real MOSIP IDRepo answers 404 for /ida/v1/face-template; verify then reads the CBEFF document."""
+    from register_id.cbeff import build_cbeff_xml
+
+    cbeff = build_cbeff_xml(uin="2459857015", jpeg_bytes=b"jpeg", descriptors=[[0.3] * 128])
+
+    class _NotFound:
+        status_code = 404
+
+    client = IDRepoClient(base_url="http://idrepo.example", enable_inprocess_fallback=False)
+    monkeypatch.setattr(client, "_send", lambda method, url, **kwargs: _NotFound())
+    monkeypatch.setattr(client, "get_identity", lambda uin, include_biometrics=False: {"cbeff_xml": cbeff})
+
+    rows = client.get_face_templates("2459857015")
+    assert rows == [{"sector": "front", "engine": "face-api-128", "embedding": [0.3] * 128}]
+
+
+def test_create_adds_the_individual_biometrics_reference_when_a_cbeff_is_sent(monkeypatch):
+    """MOSIP rejects a document whose category is not also an identity key."""
+    sent = {}
+
+    class _Ok:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"response": {"status": "ACTIVATED"}, "errors": None}
+
+    def fake_send(method, url, **kwargs):
+        sent["body"] = kwargs.get("json_body")
+        return _Ok()
+
+    client = IDRepoClient(base_url="http://idrepo.example", enable_inprocess_fallback=False)
+    monkeypatch.setattr(client, "_send", fake_send)
+    assert client.add_identity(uin="2459857015", full_name="With Face", email="f@example.org",
+                               cbeff_xml="<BIR/>", status="biometric")
+    identity = sent["body"]["request"]["identity"]
+    assert identity["individualBiometrics"]["format"] == "cbeff"
+    assert sent["body"]["request"]["documents"][0]["category"] == "individualBiometrics"
+
+
+def test_create_retry_that_finds_this_enrolment_already_saved_counts_as_saved(monkeypatch):
+    """Slow first save + client timeout + retry => IDR-IDC-012. Same UIN and name means it was saved."""
+
+    class _Exists:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"response": None, "errors": [{"errorCode": "IDR-IDC-012", "message": "Record already exists in DB"}]}
+
+    client = IDRepoClient(base_url="http://idrepo.example", enable_inprocess_fallback=False)
+    monkeypatch.setattr(client, "_send", lambda method, url, **kwargs: _Exists())
+
+    monkeypatch.setattr(client, "get_identity", lambda uin, include_biometrics=False: {"full_name": "Aye Chan Myint"})
+    assert client.add_identity(uin="2459857015", full_name="Aye Chan Myint", email="a@example.org") is True
+    assert client.last_backend == "mosip-idrepo-rest"
+
+    # A different person under that UIN is a real conflict.
+    monkeypatch.setattr(client, "get_identity", lambda uin, include_biometrics=False: {"full_name": "Someone Else"})
+    assert client.add_identity(uin="2459857015", full_name="Aye Chan Myint", email="a@example.org") is False

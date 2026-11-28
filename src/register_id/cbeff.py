@@ -6,9 +6,16 @@ CBEFF envelopes for upstream IDRepo and BioSDK interoperability.
 """
 
 import base64
+import json
 import struct
+import uuid
+from xml.sax.saxutils import escape
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+
+CBEFF_NAMESPACE = "http://standards.iso.org/iso-iec/19785/-3/ed-2/"
+FORMAT_ORGANIZATION = "Mosip"
+FORMAT_TYPE_FACE = "8"
 
 
 def extract_jpeg_bytes(data_url_or_base64: str) -> bytes:
@@ -77,42 +84,83 @@ def build_cbeff_xml(
     jpeg_bytes: bytes,
     width: int = 640,
     height: int = 480,
+    descriptors: list[list[float]] | None = None,
+    descriptor_engine: str = "face-api-128",
 ) -> str:
     """
-    Wraps an ISO/IEC 19794-5 binary face record into an ISO 19785-3 CBEFF XML structure.
-    MOSIP Format Owner: 257 (0x0101)
-    MOSIP Format Type: 8 (Face)
+    Wraps an ISO/IEC 19794-5 binary face record into the CBEFF XML a MOSIP ID Repository accepts.
+
+    Layout follows mosip-config `mosip-cbeff.xsd` (ISO/IEC 19785-3 ed-2 namespace): an outer BIR with
+    BIRInfo, holding one face BIR with BDBInfo (Index, Format Mosip/8, CreationDate, Type Face,
+    Level Raw, Purpose Enroll, Quality) and the BDB. The real IDRepo validates the document against
+    that XSD and rejects other shapes ("Cannot find the declaration of element 'BIR'").
+
+    `descriptors` (the browser's face-api match vectors) go in the face BIR's `others` section as
+    `<entry key="face-api-128#0">[...]</entry>`, which the XSD allows. The real ID Repository has no
+    endpoint for app-specific match templates, so this is how verify finds them there.
     """
     iso_record = build_iso19794_5_record(jpeg_bytes, width=width, height=height)
     bdb_base64 = base64.b64encode(iso_record).decode("utf-8")
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    index = str(uuid.uuid4())
+    del uin  # the UIN is not part of a CBEFF record
 
     xml_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<BIR xmlns="http://standards.iso.org/iso-iec/19785/-3/ed-1/">',
-        '  <Version>',
-        '    <Major>1</Major>',
-        '    <Minor>1</Minor>',
-        '  </Version>',
-        '  <CBEFFVersion>',
-        '    <Major>2</Major>',
-        '    <Minor>0</Minor>',
-        '  </CBEFFVersion>',
-        '  <BIRInfo>',
-        '    <Integrity>false</Integrity>',
-        '  </BIRInfo>',
-        '  <BDBInfo>',
-        f'    <Format Owner="257" Type="8" />',
-        '    <Type>Face</Type>',
-        '    <Subtype>Frontal</Subtype>',
-        '    <Purpose>Enroll</Purpose>',
-        '    <Quality>90</Quality>',
-        f'    <CreationDate>{now_iso}</CreationDate>',
-        '  </BDBInfo>',
-        f'  <BDB>{bdb_base64}</BDB>',
+        f'<BIR xmlns="{CBEFF_NAMESPACE}">',
+        '  <Version><Major>1</Major><Minor>1</Minor></Version>',
+        '  <CBEFFVersion><Major>1</Major><Minor>1</Minor></CBEFFVersion>',
+        '  <BIRInfo><Integrity>false</Integrity></BIRInfo>',
+        '  <BIR>',
+        '    <Version><Major>1</Major><Minor>1</Minor></Version>',
+        '    <CBEFFVersion><Major>1</Major><Minor>1</Minor></CBEFFVersion>',
+        '    <BIRInfo><Integrity>false</Integrity></BIRInfo>',
+        '    <BDBInfo>',
+        f'      <Index>{index}</Index>',
+        f'      <Format><Organization>{FORMAT_ORGANIZATION}</Organization><Type>{FORMAT_TYPE_FACE}</Type></Format>',
+        f'      <CreationDate>{now_iso}</CreationDate>',
+        '      <Type>Face</Type>',
+        '      <Subtype></Subtype>',
+        '      <Level>Raw</Level>',
+        '      <Purpose>Enroll</Purpose>',
+        '      <Quality><Algorithm><Organization>HMAC</Organization><Type>SHA-256</Type></Algorithm>'
+        '<Score>90</Score></Quality>',
+        '    </BDBInfo>',
+        f'    <BDB>{bdb_base64}</BDB>',
+    ]
+    if descriptors:
+        xml_lines.append('    <others>')
+        for i, vector in enumerate(descriptors):
+            values = json.dumps([float(v) for v in vector], separators=(",", ":"))
+            xml_lines.append(f'      <entry key="{escape(descriptor_engine)}#{i}">{values}</entry>')
+        xml_lines.append('    </others>')
+    xml_lines += [
+        '  </BIR>',
         '</BIR>',
     ]
     return "\n".join(xml_lines)
+
+
+def descriptors_from_cbeff(xml_content: str, descriptor_engine: str = "face-api-128") -> list[list[float]]:
+    """Return the match vectors stored by build_cbeff_xml(descriptors=...). Missing or broken entries are skipped."""
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError:
+        return []
+    vectors = []
+    for elem in root.iter():
+        if elem.tag.split("}", 1)[-1] != "entry":
+            continue
+        key = elem.get("key", "")
+        if not key.startswith(f"{descriptor_engine}#") or not elem.text:
+            continue
+        try:
+            values = json.loads(elem.text)
+        except ValueError:
+            continue
+        if isinstance(values, list) and all(isinstance(v, (int, float)) for v in values):
+            vectors.append([float(v) for v in values])
+    return vectors
 
 
 def parse_cbeff_xml(xml_content: str) -> dict:
@@ -125,13 +173,17 @@ def parse_cbeff_xml(xml_content: str) -> dict:
         if "}" in elem.tag:
             elem.tag = elem.tag.split("}", 1)[1]
 
-    bdb_elem = root.find("BDB")
-    bdb_base64 = bdb_elem.text.strip() if bdb_elem is not None and bdb_elem.text else ""
+    # The face BDB sits in a nested BIR (MOSIP layout); older single-BIR documents keep it at the top.
+    bdb_elem = next((e for e in root.iter("BDB") if e.text and e.text.strip()), None)
+    bdb_base64 = bdb_elem.text.strip() if bdb_elem is not None else ""
+    fmt = next(root.iter("Format"), None)
+    organization = fmt.findtext("Organization") if fmt is not None else None
+    format_type = fmt.findtext("Type") if fmt is not None else None
 
     return {
         "version": "1.1",
-        "formatOwner": "257",
-        "formatType": "8",
+        "formatOwner": organization or (fmt.get("Owner") if fmt is not None else None) or FORMAT_ORGANIZATION,
+        "formatType": format_type or (fmt.get("Type") if fmt is not None else None) or FORMAT_TYPE_FACE,
         "bdbBase64": bdb_base64,
         "rawBytesLength": len(base64.b64decode(bdb_base64)) if bdb_base64 else 0,
     }

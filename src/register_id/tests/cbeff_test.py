@@ -30,10 +30,35 @@ def test_build_and_parse_cbeff_xml():
     jpeg = b"mock-selfie-data"
     xml = build_cbeff_xml(uin="1234-5678-9012", jpeg_bytes=jpeg)
     assert '<?xml version="1.0"' in xml
-    assert '<Format Owner="257" Type="8"' in xml
+    # MOSIP IDRepo validates against mosip-cbeff.xsd: ISO 19785-3 ed-2 namespace, nested face BIR.
+    assert '<BIR xmlns="http://standards.iso.org/iso-iec/19785/-3/ed-2/">' in xml
+    assert "<Format><Organization>Mosip</Organization><Type>8</Type></Format>" in xml
+    assert "<Type>Face</Type>" in xml and "<Level>Raw</Level>" in xml
     assert "<BDB>" in xml
 
+    ns = "{http://standards.iso.org/iso-iec/19785/-3/ed-2/}"
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml)
+    face = root.find(f"{ns}BIR")
+    assert face is not None and face.find(f"{ns}BDBInfo/{ns}Type").text == "Face"
+    assert face.find(f"{ns}BDB").text
+
     parsed = parse_cbeff_xml(xml)
-    assert parsed["formatOwner"] == "257"
+    assert parsed["formatOwner"] == "Mosip"
     assert parsed["formatType"] == "8"
     assert parsed["rawBytesLength"] > 0
+
+
+def test_cbeff_carries_face_descriptors_for_verify():
+    """A real MOSIP IDRepo has no template endpoint, so the descriptors ride in the CBEFF `others` section."""
+    from register_id.cbeff import descriptors_from_cbeff
+
+    vectors = [[0.1] * 128, [0.25] * 128]
+    xml = build_cbeff_xml(uin="2459857015", jpeg_bytes=b"jpeg", descriptors=vectors)
+    assert '<entry key="face-api-128#0">' in xml
+    # `others` must follow BDB inside the face BIR (XSD sequence order).
+    assert xml.index("<BDB>") < xml.index("<others>") < xml.index("</BIR>")
+    assert descriptors_from_cbeff(xml) == vectors
+    assert descriptors_from_cbeff(build_cbeff_xml(uin="1", jpeg_bytes=b"jpeg")) == []
+    assert descriptors_from_cbeff("not xml") == []
